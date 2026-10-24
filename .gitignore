@@ -1,0 +1,20 @@
+# Godot 4
+.godot/
+/android/
+export_presets.cfg
+*.translation
+
+# .NET / IDEs
+bin/
+obj/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+mono_crash.*.json
+build_log.txt
+
+# Local scratch: update archives and drafts
+_*.tgz
+Claude outputs/
