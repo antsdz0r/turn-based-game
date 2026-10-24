@@ -15,9 +15,11 @@ public static partial class Database
         return d;
     }
 
-    private static readonly Dictionary<string, EnemyDef> EnemyTable = BuildEnemies().ToDictionary(e => e.Id);
+    private static readonly Dictionary<string, EnemyDef> EnemyTable = BuildEnemies().Concat(BuildRegionPack3()).Concat(BuildSecretBoss()).ToDictionary(e => e.Id);
 
-    public static EnemyDef EnemyDefinition(string id) => EnemyTable[id];
+    public static EnemyDef EnemyDefinition(string id) =>
+        EnemyTable.TryGetValue(id, out var def) ? def : throw new KeyNotFoundException($"Unknown enemy id '{id}'");
+    public static bool HasEnemy(string id) => EnemyTable.ContainsKey(id);
     public static IEnumerable<EnemyDef> AllEnemies => EnemyTable.Values;
 
     private static IEnumerable<EnemyDef> BuildEnemies()
@@ -128,7 +130,7 @@ public static partial class Database
         {
             Id = "gravemaw", Name = "Gravemaw", Sprite = "ghoul", Tint = "#ff9a8a", Scale = 1.35f, IsElite = true,
             Blurb = "Elite. At half health it frenzies: new attacks, new weaknesses.",
-            MaxHp = 64, Armor = 2, Speed = 5, Row = Row.Front, BreakMax = 4, Gold = 40,
+            MaxHp = 96, Armor = 2, Speed = 5, Row = Row.Front, BreakMax = 4, Gold = 40,
             Affinities = Aff(weak: [Element.Fire, Element.Lightning], resist: [Element.Ice]),
             Moves =
             [
@@ -191,8 +193,9 @@ public static partial class Database
         yield return new EnemyDef
         {
             Id = "colossus", Name = "The Bone Colossus", Sprite = "colossus", Scale = 1.35f, IsBoss = true, ShiftingWeakPoint = true,
-            Blurb = "Guardian of the Ashen Crypt. Every round its grave-fire core shifts and exposes a new WEAK POINT: hit that element for double damage.",
-            MaxHp = 110, Armor = 4, Speed = 3, Row = Row.Front, BreakMax = 4, Gold = 60,
+            Epithet = "Guardian of the Ashen Crypt", MechanicHint = "Its core shifts every round: strike the exposed weak point.",
+            Blurb = "Guardian of the Ashen Crypt. Every round its grave-fire core shifts and exposes a new WEAK POINT: hit that element for double damage. In phase 2 it exposes TWO weak points but hits harder. Each time it recovers from a break, its meter grows.",
+            MaxHp = 122, Armor = 4, Speed = 3, Row = Row.Front, BreakMax = 4, Gold = 60,
             Affinities = Aff(weak: [Element.Physical, Element.Fire], resist: [Element.Ice]),
             Moves =
             [
@@ -271,7 +274,7 @@ public static partial class Database
         {
             Id = "siren_queen", Name = "Abyssal Siren", Sprite = "siren", Tint = "#b0a0ff", Scale = 1.3f, IsElite = true,
             Blurb = "Elite. Calls drowned thralls and charges a crushing dirge.",
-            MaxHp = 56, Armor = 1, Speed = 6, Row = Row.Back, BreakMax = 4, Gold = 40,
+            MaxHp = 88, Armor = 1, Speed = 6, Row = Row.Back, BreakMax = 4, Gold = 40,
             Affinities = Aff(weak: [Element.Physical, Element.Lightning], resist: [Element.Ice, Element.Fire]),
             Moves =
             [
@@ -298,7 +301,8 @@ public static partial class Database
         yield return new EnemyDef
         {
             Id = "matriarch", Name = "The Drowned Matriarch", Sprite = "matriarch", Scale = 1.35f, IsBoss = true,
-            Blurb = "Queen of the Drowned Halls. Her RISING TIDE floods the front row: when she charges it, pull your heroes back!",
+            Epithet = "Queen of the Drowned Halls", MechanicHint = "When the tide is charging, move the threatened row.",
+            Blurb = "Queen of the Drowned Halls. Her RISING TIDE floods the front row: when she charges it, pull your heroes back! In phase 2 the tide turns: an UNDERTOW drags at the back row too, so watch which row she is charging.",
             MaxHp = 130, Armor = 2, Speed = 5, Row = Row.Front, BreakMax = 5, Gold = 80,
             Affinities = Aff(weak: [Element.Lightning, Element.Physical], resist: [Element.Ice, Element.Fire]),
             Moves =
@@ -320,6 +324,8 @@ public static partial class Database
                 new() { Id = "depths", Name = "Crushing Depths", Target = MoveTarget.FrontRow, Melee = true, Power = 9, Hits = 2 },
                 new() { Id = "abyss_wail", Name = "Abyssal Wail", Target = MoveTarget.AllHeroes, Element = Element.Ice, Power = 8, Vfx = Vfx.Cloud },
                 new() { Id = "drown2", Name = "Drown", Element = Element.Ice, Power = 22, Pick = HeroPick.LowestHp, Charged = true, Vfx = Vfx.Beam },
+                new() { Id = "undertow", Name = "Undertow", Target = MoveTarget.BackOnly, Element = Element.Ice, Power = 20, Charged = true,
+                        Vfx = Vfx.Cloud, Applies = { new StatusApply(StatusKind.Slowed, 0, 2) } },
                 new() { Id = "flood2", Name = "Abyssal Tide", Target = MoveTarget.FrontOnly, Element = Element.Ice, Power = 26, Charged = true,
                         Vfx = Vfx.Cloud, Applies = { new StatusApply(StatusKind.Slowed, 0, 2) } },
                 new() { Id = "tide_mend", Name = "Tide's Embrace", Kind = MoveKind.Heal, Target = MoveTarget.Self, Power = 14, Vfx = Vfx.Heal },
@@ -381,7 +387,7 @@ public static partial class Database
         {
             Id = "alpha_hound", Name = "Alpha Bone Hound", Sprite = "hound", Tint = "#ffb0a0", Scale = 1.35f, IsElite = true,
             Blurb = "Elite. Leads the pack: it calls more hounds and savages the weak.",
-            MaxHp = 56, Armor = 2, Speed = 9, Row = Row.Front, BreakMax = 3, Gold = 40,
+            MaxHp = 90, Armor = 2, Speed = 9, Row = Row.Front, BreakMax = 3, Gold = 40,
             Affinities = Aff(weak: [Element.Fire, Element.Physical]),
             Moves =
             [
@@ -394,17 +400,18 @@ public static partial class Database
         {
             Id = "phylactery", Name = "Phylactery", Sprite = "phylactery",
             Blurb = "The Lich's soul-jar. While it stands she takes 60% less damage, and it keeps mending her.",
-            MaxHp = 36, Armor = 2, Speed = 2, Row = Row.Back, BreakMax = 2, Gold = 0,
+            MaxHp = 30, Armor = 2, Speed = 2, Row = Row.Back, BreakMax = 2, Gold = 0,
             Affinities = Aff(weak: [Element.Physical, Element.Lightning], immune: [Element.Ice]),
             Moves =
             [
-                new() { Id = "soul_tether", Name = "Soul Tether", Kind = MoveKind.Heal, Target = MoveTarget.Ally, Power = 9, Vfx = Vfx.Heal },
+                new() { Id = "soul_tether", Name = "Soul Tether", Kind = MoveKind.Heal, Target = MoveTarget.Ally, Power = 7, Vfx = Vfx.Heal },
             ],
         };
         yield return new EnemyDef
         {
             Id = "lich", Name = "Vaelith, the Frost Lich", Sprite = "lich", Scale = 1.35f, IsBoss = true, ProtectedBy = "phylactery",
-            Blurb = "Mistress of the Frozen Ossuary. WARDED while her Phylactery stands (-60% damage): smash it first! Her Glacial Prison freezes a hero solid.",
+            Epithet = "Mistress of the Frozen Ossuary", MechanicHint = "Shatter the Phylactery first: while it stands, she is warded.",
+            Blurb = "Mistress of the Frozen Ossuary. WARDED while her Phylactery stands (-60% damage): smash it first! Shattering it also tears at her soul (damage and 2 break pips). Her Glacial Prison freezes a hero solid, and in phase 2 she binds a new Phylactery once.",
             MaxHp = 130, Armor = 2, Speed = 5, Row = Row.Front, BreakMax = 5, Gold = 90,
             Affinities = Aff(weak: [Element.Fire, Element.Lightning], resist: [Element.Ice]),
             Moves =
@@ -471,7 +478,7 @@ public static partial class Database
         {
             Id = "thunderbird", Name = "Thunderbird", Sprite = "harpy", Tint = "#ffe09a", Scale = 1.35f, IsElite = true,
             Blurb = "Elite. A great storm-bird. Its Gale is charged: break it or brace.",
-            MaxHp = 60, Armor = 1, Speed = 10, Dodge = 15, Row = Row.Back, BreakMax = 4, Gold = 45,
+            MaxHp = 100, Armor = 1, Speed = 10, Dodge = 15, Row = Row.Back, BreakMax = 4, Gold = 45,
             Affinities = Aff(weak: [Element.Ice, Element.Physical], resist: [Element.Lightning]),
             Moves =
             [
@@ -490,21 +497,22 @@ public static partial class Database
             Moves =
             [
                 new() { Id = "arc_slam", Name = "Arc Slam", Target = MoveTarget.FrontRow, Melee = true, Element = Element.Lightning, Power = 10 },
-                new() { Id = "overload", Name = "Overload", Target = MoveTarget.AllHeroes, Element = Element.Lightning, Power = 15, Charged = true, Vfx = Vfx.Beam },
+                new() { Id = "overload", Name = "Overload", Target = MoveTarget.AllHeroes, Element = Element.Lightning, Power = 12, Charged = true, Vfx = Vfx.Beam },
             ],
         };
         yield return new EnemyDef
         {
             Id = "tyrant", Name = "Kharos, the Storm Tyrant", Sprite = "tyrant", Scale = 1.35f, IsBoss = true,
-            Blurb = "Lord of the Storm Spire. His STORM BRAND marks a hero; the next Thunderstrike hits that hero for massive damage. Defend, protect or heal them!",
-            MaxHp = 140, Armor = 3, Speed = 6, Row = Row.Front, BreakMax = 5, Gold = 95,
+            Epithet = "Lord of the Storm Spire", MechanicHint = "The brand marks his next target: shield, cleanse or defend them.",
+            Blurb = "Lord of the Storm Spire. His STORM BRAND marks a hero; the next Thunderstrike hits that hero for massive damage. Defend, protect or heal them! In phase 2 the brand forks across the back row and the strike hits every branded hero: cleanse the brand or spread out.",
+            MaxHp = 110, Armor = 3, Speed = 6, Row = Row.Front, BreakMax = 5, Gold = 95,
             Affinities = Aff(weak: [Element.Ice, Element.Physical], resist: [Element.Lightning]),
             Moves =
             [
                 new() { Id = "storm_brand", Name = "Storm Brand", Element = Element.Lightning, Power = 3, Pick = HeroPick.HighestHp, Vfx = Vfx.Debuff,
                         Applies = { new StatusApply(StatusKind.Marked, 0, 3) } },
-                new() { Id = "thunderstrike", Name = "Thunderstrike", Element = Element.Lightning, Power = 26, Pick = HeroPick.Marked, Charged = true, Vfx = Vfx.Beam },
-                new() { Id = "tempest", Name = "Tempest", Target = MoveTarget.AllHeroes, Element = Element.Lightning, Power = 6, Vfx = Vfx.Cloud },
+                new() { Id = "thunderstrike", Name = "Thunderstrike", Element = Element.Lightning, Power = 22, Pick = HeroPick.Marked, Charged = true, Vfx = Vfx.Beam },
+                new() { Id = "tempest", Name = "Tempest", Target = MoveTarget.AllHeroes, Element = Element.Lightning, Power = 5, Vfx = Vfx.Cloud },
             ],
             Phase2Name = "Kharos, Eye of the Storm",
             Phase2Affinities = Aff(weak: [Element.Fire, Element.Ice], resist: [Element.Lightning, Element.Physical]),
@@ -512,8 +520,12 @@ public static partial class Database
             Phase2Moves =
             [
                 new() { Id = "storm_brand2", Name = "Storm Brand", Element = Element.Lightning, Power = 4, Pick = HeroPick.HighestHp, Vfx = Vfx.Debuff,
-                        Applies = { new StatusApply(StatusKind.Marked, 0, 3) } },
-                new() { Id = "thunderstrike2", Name = "Thunderstrike", Element = Element.Lightning, Power = 30, Pick = HeroPick.Marked, Charged = true, Vfx = Vfx.Beam },
+                        Applies = { new StatusApply(StatusKind.Marked, 0, 4) } },
+                // Escalation: the brand forks across the whole back row, and the strike hits EVERY branded hero.
+                new() { Id = "forked_brand", Name = "Forked Brand", Target = MoveTarget.BackRow, Element = Element.Lightning, Power = 3, Accuracy = 100, Vfx = Vfx.Debuff,
+                        Applies = { new StatusApply(StatusKind.Marked, 0, 4) } },
+                new() { Id = "thunderstrike2", Name = "Thunderstrike", Target = MoveTarget.Branded, Element = Element.Lightning, Power = 16,
+                        Charged = true, Vfx = Vfx.Beam },
                 new() { Id = "cyclone", Name = "Cyclone", Target = MoveTarget.FrontRow, Melee = true, Power = 8, Hits = 2 },
                 new() { Id = "call_harpies", Name = "Call the Harpies", Kind = MoveKind.Summon, Target = MoveTarget.Self, SummonId = "harpy", Vfx = Vfx.Buff },
             ],
@@ -569,12 +581,84 @@ public static partial class Database
             ],
         };
 
+        // ═════ New threats: one per region, each a target-priority puzzle ═════
+        yield return new EnemyDef
+        {
+            Id = "bellringer", Name = "Bell Ringer", Sprite = "bellringer",
+            Blurb = "A hunched sexton. Every third round its FUNERAL TOLL empowers every enemy; its dread toll weakens your party. Silence it first.",
+            MaxHp = 30, Armor = 1, Speed = 3, Row = Row.Back, BreakMax = 2, Gold = 16,
+            Affinities = Aff(weak: [Element.Physical, Element.Fire], resist: [Element.Ice]),
+            Moves =
+            [
+                new() { Id = "toll", Name = "Funeral Toll", Kind = MoveKind.Empower, Target = MoveTarget.AllAllies, Vfx = Vfx.Buff,
+                        Applies = { new StatusApply(StatusKind.Empowered, 0, 2) } },
+                new() { Id = "dread_toll", Name = "Toll of Dread", Target = MoveTarget.AllHeroes, Power = 2, Vfx = Vfx.Cloud,
+                        Applies = { new StatusApply(StatusKind.Weakened, 0, 1) } },
+                new() { Id = "bell_strike", Name = "Bell Strike", Power = 6, Vfx = Vfx.Projectile },
+            ],
+        };
+        yield return new EnemyDef
+        {
+            Id = "shellback", Name = "Shellback", Sprite = "shellback",
+            Blurb = "A barnacled crab with 6 armor. It hunkers behind its shell when hurt and charges a crushing pincer. Lightning cracks it; armor-piercing and the hammer help.",
+            MaxHp = 50, Armor = 6, Speed = 2, Row = Row.Front, BreakMax = 4, Gold = 22,
+            Affinities = Aff(weak: [Element.Lightning], resist: [Element.Ice]),
+            Moves =
+            [
+                new() { Id = "pinch", Name = "Pinch", Melee = true, Power = 8, Pick = HeroPick.Frontline },
+                new() { Id = "shell_up", Name = "Shell Up", Kind = MoveKind.Defend, Target = MoveTarget.Self, Power = 10, Vfx = Vfx.Buff },
+                new() { Id = "crush", Name = "Pincer Crush", Melee = true, Power = 16, Pick = HeroPick.Frontline, Charged = true,
+                        Applies = { new StatusApply(StatusKind.Weakened, 0, 2) } },
+            ],
+        };
+        yield return new EnemyDef
+        {
+            Id = "rime_sentinel", Name = "Rime Sentinel", Sprite = "rime_sentinel",
+            Blurb = "An ice totem. It shields wounded allies and chills your party every round. Fire melts it.",
+            MaxHp = 34, Armor = 2, Speed = 2, Row = Row.Back, BreakMax = 3, Gold = 18,
+            Affinities = Aff(weak: [Element.Fire, Element.Physical], immune: [Element.Ice]),
+            Moves =
+            [
+                new() { Id = "rime_ward", Name = "Rime Ward", Kind = MoveKind.Shield, Target = MoveTarget.Ally, Power = 7, Vfx = Vfx.Buff },
+                new() { Id = "chill", Name = "Biting Chill", Target = MoveTarget.AllHeroes, Element = Element.Ice, Power = 2, Vfx = Vfx.Cloud,
+                        Applies = { new StatusApply(StatusKind.Slowed, 0, 1) } },
+            ],
+        };
+        yield return new EnemyDef
+        {
+            Id = "ballista", Name = "Storm Ballista", Sprite = "ballista",
+            Blurb = "A siege engine. Every third round it charges a BALLISTA BOLT that skewers your whole back row: move them forward, or wreck it first.",
+            MaxHp = 36, Armor = 3, Speed = 3, Row = Row.Back, BreakMax = 3, Gold = 20,
+            Affinities = Aff(weak: [Element.Ice, Element.Physical], resist: [Element.Lightning]),
+            Moves =
+            [
+                new() { Id = "ballista_bolt", Name = "Ballista Bolt", Target = MoveTarget.BackOnly, Power = 18, Accuracy = 100, Charged = true, Vfx = Vfx.Arrow },
+                new() { Id = "rattle_shot", Name = "Rattle Shot", Power = 6, Pick = HeroPick.Backline, Vfx = Vfx.Arrow },
+                new() { Id = "reload", Name = "Reload", Kind = MoveKind.Defend, Target = MoveTarget.Self, Power = 6, Vfx = Vfx.Buff },
+            ],
+        };
+        yield return new EnemyDef
+        {
+            Id = "ash_priest", Name = "Ash Priest", Sprite = "ash_priest",
+            Blurb = "A priest of the Hollow King. Mends allies and swings a censer that sets your party burning. Immune to fire; ice puts it out.",
+            MaxHp = 30, Armor = 1, Speed = 4, Row = Row.Back, BreakMax = 2, Gold = 18,
+            Affinities = Aff(weak: [Element.Ice], immune: [Element.Fire]),
+            Moves =
+            [
+                new() { Id = "ash_mend", Name = "Ash Mend", Kind = MoveKind.Heal, Target = MoveTarget.Ally, Power = 10, Vfx = Vfx.Heal },
+                new() { Id = "censer", Name = "Censer Swing", Target = MoveTarget.AllHeroes, Element = Element.Fire, Power = 3, Vfx = Vfx.Cloud,
+                        Applies = { new StatusApply(StatusKind.Burn, 2, 2) } },
+                new() { Id = "sear", Name = "Sear", Element = Element.Fire, Power = 7, Pick = HeroPick.LowestHp, Vfx = Vfx.Projectile },
+            ],
+        };
+
         // ───── Boss ─────
         yield return new EnemyDef
         {
             Id = "hollow_king", Name = "The Hollow King", Sprite = "hollow_king", Scale = 1.4f, IsBoss = true,
-            Blurb = "He devoured the Last Ember's heart. He USURPS your heroes' best abilities, and in phase 2 his weaknesses change and he eats his own minions.",
-            MaxHp = 135, Armor = 3, Speed = 5, Row = Row.Front, BreakMax = 5, Gold = 100,
+            Epithet = "Devourer of the Last Ember", MechanicHint = "He seals your best skill and eats his servants: everything you learned, at once.",
+            Blurb = "He devoured the Last Ember's heart. He USURPS your heroes' best abilities (his bubble names the one he'll seal). In phase 2 everything you've learned returns: he eats his own minions (kill them first) and his stolen ember exposes a shifting WEAK POINT every round.",
+            MaxHp = 160, Armor = 3, Speed = 5, Row = Row.Front, BreakMax = 5, Gold = 100,
             Affinities = Aff(weak: [Element.Ice, Element.Lightning], resist: [Element.Fire]),
             Moves =
             [
@@ -587,12 +671,13 @@ public static partial class Database
                 new() { Id = "usurp", Name = "Usurp", Kind = MoveKind.Usurp, Pick = HeroPick.HighestHp, Vfx = Vfx.Debuff },
             ],
             Phase2Name = "The Ember-Devoured King",
+            Phase2ShiftingWeakPoint = true,
             Phase2Affinities = Aff(weak: [Element.Physical, Element.Ice], resist: [Element.Lightning], immune: [Element.Fire]),
             Phase2BreakMax = 6,
             Phase2Moves =
             [
-                new() { Id = "rend", Name = "Cinder Rend", Target = MoveTarget.FrontRow, Melee = true, Element = Element.Fire, Power = 8, Hits = 2 },
-                new() { Id = "ashfall", Name = "Ashfall", Target = MoveTarget.AllHeroes, Element = Element.Fire, Power = 14,
+                new() { Id = "rend", Name = "Cinder Rend", Target = MoveTarget.FrontRow, Melee = true, Element = Element.Fire, Power = 9, Hits = 2 },
+                new() { Id = "ashfall", Name = "Ashfall", Target = MoveTarget.AllHeroes, Element = Element.Fire, Power = 16,
                         Charged = true, Vfx = Vfx.Cloud, Applies = { new StatusApply(StatusKind.Burn, 4, 2) } },
                 new() { Id = "consume", Name = "Consume Servant", Kind = MoveKind.Consume, Target = MoveTarget.Self, Power = 24, Vfx = Vfx.Heal },
                 new() { Id = "call_dead2", Name = "Call the Dead", Kind = MoveKind.Summon, Target = MoveTarget.Self, SummonId = "bones", Vfx = Vfx.Buff },
@@ -607,7 +692,7 @@ public static partial class Database
         var def = EnemyDefinition(id);
         // Regular enemies have 25% less HP than their listed value (bosses 15% less): shorter, punchier fights.
         double trim = def.IsBoss ? 0.85 : 0.75;
-        int hp = (int)Math.Round(def.MaxHp * trim * (1 + 0.03 * floor) * (heat >= 1 ? 1.15 : 1.0));
+        int hp = (int)Math.Round(def.MaxHp * trim * (1 + 0.03 * floor));
         int breakMax = def.BreakMax + (heat >= 2 && (def.IsElite || def.IsBoss) ? 1 : 0);
         return new Combatant
         {
@@ -644,44 +729,50 @@ public static partial class Database
             "Backgrounds/crypt.png", "#ffffff", "battle", "bones",
             Easy: [["bones", "bones"], ["bones", "archer"], ["rats", "rats"], ["blight", "bones"], ["moth", "bones"]],
             Hard: [["ghoul", "bones", "archer"], ["ghoul", "moth"], ["rats", "rats", "blight"], ["bones", "bones", "archer"],
-                   ["ghoul", "blight"], ["bones", "acolyte", "archer"]],
+                   ["ghoul", "blight"], ["bones", "acolyte", "archer"], ["bones", "bones", "bellringer"], ["ghoul", "bellringer"]],
             Elites: [["gravemaw"], ["gravemaw", "rats"], ["templar", "archer"]],
             Boss: ["bones", "colossus"]),
         new(1, "The Drowned Halls", "Black water fills the old cathedral cellars. Something sings below.",
             "Backgrounds/drowned.png", "#ffffff", "battle_drowned", "thrall",
             Easy: [["thrall", "siren"], ["leech", "leech"], ["thrall", "wraith"], ["leech", "siren"], ["thrall", "caller"]],
             Hard: [["thrall", "thrall", "siren"], ["leech", "wraith", "caller"], ["thrall", "siren", "acolyte"],
-                   ["leech", "thrall", "wraith"], ["bulwark", "siren", "leech"]],
+                   ["leech", "thrall", "wraith"], ["bulwark", "siren", "leech"], ["shellback", "siren"], ["shellback", "thrall", "leech"]],
             Elites: [["siren_queen"], ["champion", "siren"], ["champion", "leech"]],
             Boss: ["thrall", "matriarch"]),
         new(2, "The Frozen Ossuary", "A catacomb buried in ice. The dead here do not rot; they wait.",
             "Backgrounds/frost.png", "#ffffff", "battle_frost", "wight",
             Easy: [["wight", "wisp"], ["hound", "hound"], ["wight", "hound"], ["wisp", "wisp", "hound"]],
-            Hard: [["wight", "wight", "wisp"], ["hound", "hound", "wisp"], ["wight", "wraith", "wisp"], ["bulwark", "wisp", "hound"]],
+            Hard: [["wight", "wight", "wisp"], ["hound", "hound", "wisp"], ["wight", "wraith", "wisp"], ["bulwark", "wisp", "hound"],
+                   ["wight", "rime_sentinel"], ["hound", "hound", "rime_sentinel"]],
             Elites: [["revenant"], ["revenant", "wisp"], ["alpha_hound", "hound"]],
             Boss: ["wight", "lich", "phylactery"]),
         new(3, "The Storm Spire", "A tower of black stone where lightning never stops falling.",
             "Backgrounds/storm.png", "#ffffff", "battle_storm", "harpy",
             Easy: [["harpy", "harpy"], ["construct", "stormcaller"], ["harpy", "stormcaller"], ["construct", "harpy"]],
             Hard: [["construct", "harpy", "stormcaller"], ["construct", "construct", "harpy"], ["harpy", "harpy", "stormcaller"],
-                   ["bulwark", "stormcaller", "harpy"]],
+                   ["bulwark", "stormcaller", "harpy"], ["construct", "ballista"], ["harpy", "stormcaller", "ballista"]],
             Elites: [["thunderbird"], ["arc_golem", "stormcaller"], ["thunderbird", "harpy"]],
             Boss: ["construct", "tyrant"]),
         new(4, "The Cinder Throne", "The heart of the Last Ember, devoured. Everything here burns.",
             "Backgrounds/cinder.png", "#ffffff", "battle_cinder", "imp",
             Easy: [["imp", "bulwark"], ["imp", "imp"], ["golem", "imp"], ["bulwark", "acolyte"]],
             Hard: [["bulwark", "imp", "acolyte"], ["golem", "imp", "imp"], ["bulwark", "golem", "imp"],
-                   ["golem", "bulwark"], ["golem", "acolyte", "blight"]],
+                   ["golem", "bulwark"], ["golem", "acolyte", "blight"], ["golem", "ash_priest"], ["imp", "bulwark", "ash_priest"]],
             Elites: [["behemoth"], ["templar", "imp"], ["behemoth", "imp"], ["templar", "acolyte"]],
             Boss: ["imp", "hollow_king"]),
+        GardenRegion,
+        ArchiveRegion,
     };
 
     public static RegionDef Region(int index) => Regions[Math.Clamp(index, 0, Regions.Count - 1)];
     public static int RegionIndex(string key) => Regions.FirstOrDefault(r => r.Key == key)?.Index ?? 0;
 
-    public static string[] PickEncounter(NodeType type, int floor, Random rng)
+    /// <summary>An encounter from the default region for this floor (tests and tools).</summary>
+    public static string[] PickEncounter(NodeType type, int floor, Random rng) =>
+        PickEncounter(type, Region(DungeonMap.RegionOf(floor)), floor, rng);
+
+    public static string[] PickEncounter(NodeType type, RegionDef region, int floor, Random rng)
     {
-        var region = Region(DungeonMap.RegionOf(floor));
         if (type == NodeType.Boss) return region.Boss;
         if (type == NodeType.Elite) return region.Elites[rng.Next(region.Elites.Length)];
         var pool = floor % DungeonMap.FloorsPerRegion == 0 ? region.Easy : region.Hard;
@@ -690,7 +781,10 @@ public static partial class Database
 
     public static List<Combatant> CreateEncounter(string[] ids, int floor, int heat = 0)
     {
-        var units = ids.Select(id => CreateEnemy(id, floor, false, heat)).ToList();
+        // Unknown ids are skipped instead of crashing the battle; if nothing is left, fall back to the region's pool.
+        var valid = ids.Where(HasEnemy).ToArray();
+        if (valid.Length == 0) valid = Region(DungeonMap.RegionOf(floor)).Easy[0];
+        var units = valid.Select(id => CreateEnemy(id, floor, false, heat)).ToList();
         foreach (var row in new[] { Row.Front, Row.Back })
         {
             int slot = 0;

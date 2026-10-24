@@ -114,7 +114,10 @@ public partial class RewardScene : Screen
         var name = Visuals.Label(option.Title, 18, Visuals.GoldBright, serif: true);
         name.HorizontalAlignment = HorizontalAlignment.Center;
         box.AddChild(name);
-        var desc = Visuals.Rich($"[center]{option.Description}[/center]", 13);
+        // Equipment: show what the party has in that slot now, so the choice is a comparison, not a guess.
+        string compare = option.Kind == RewardKind.Equipment && Database.HasItem(option.Id)
+            ? $"\n[color=#7d7590]{run.EquippedSummary(Database.Item(option.Id))}[/color]" : "";
+        var desc = Visuals.Rich($"[center]{option.Description}{compare}[/center]", 13);
         desc.CustomMinimumSize = new Vector2(226, 0);
         desc.SizeFlagsVertical = SizeFlags.ExpandFill;
         box.AddChild(desc);
@@ -176,6 +179,7 @@ public partial class RewardScene : Screen
             GetViewport().SetInputAsHandled();
             Continue();
         }
+        else base._UnhandledInput(@event);   // arrows / Tab focus the reward cards
     }
 
     private void Continue()

@@ -54,7 +54,7 @@ public partial class CutsceneScene : Screen
         // Party on the left
         for (int i = 0; i < run.Party.Count; i++)
         {
-            var sprite = Visuals.UnitSprite(run.Party[i].Id, 2.5f);
+            var sprite = Visuals.UnitSprite(run.Party[i].Sprite, 2.5f);
             var home = new Vector2(size.X * 0.14f + i * 130, baseline + (i % 2) * 14);
             sprite.Position = home + new Vector2(-400, 0);
             AddChild(sprite);
@@ -324,7 +324,7 @@ public partial class CutsceneScene : Screen
     private string SpeakerPortrait(string speaker) => speaker switch
     {
         "keeper" or "boss" => $"Units/{_scene.RightSprite}.png",
-        _ when speaker.StartsWith('h') && int.TryParse(speaker[1..], out int i) && i < _run.Party.Count => $"Portraits/{_run.Party[i].Id}.png",
+        _ when speaker.StartsWith('h') && int.TryParse(speaker[1..], out int i) && i < _run.Party.Count => $"Portraits/{_run.Party[i].Sprite}.png",
         _ => "Portraits/vanguard.png",
     };
 

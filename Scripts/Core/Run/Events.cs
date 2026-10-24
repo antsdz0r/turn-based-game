@@ -29,7 +29,7 @@ public sealed class EventDef
 }
 
 /// <summary>Map events: short choices with real consequences.</summary>
-public static class Events
+public static partial class Events
 {
     private static string DamageParty(RunState run, int amount)
     {
@@ -37,8 +37,82 @@ public static class Events
         return $"Every hero loses {amount} HP.";
     }
 
+    /// <summary>A weapon without a family mechanic: equipped by a hero (hero set) or in the bag (hero null).</summary>
+    private static (HeroState? hero, string id)? PlainWeapon(RunState run)
+    {
+        static bool Plain(string? id) => id is not null && Database.HasItem(id) && Database.Item(id) is { Kind: ItemKind.Weapon, WeaponEffect: null };
+        foreach (var hero in run.Party) if (Plain(hero.Weapon)) return (hero, hero.Weapon!);
+        foreach (var id in run.Equipment) if (Plain(id)) return (null, id);
+        return null;
+    }
+
     public static readonly IReadOnlyList<EventDef> All = new List<EventDef>
     {
+        new()
+        {
+            Id = "duelist", Title = "The Duelist's Ghost", Weight = 8, Requires = r => (r.Node?.Region ?? 0) >= 1,
+            Text = "A pale swordsman bows in the middle of the corridor. \"One bout. Best my champion and take a prize from my grave. Or sit with me and learn.\"",
+            Choices =
+            [
+                new()
+                {
+                    Label = "Accept the duel", Hint = "Fight one of this region's elites. Win an elite reward (a relic is always among the choices).",
+                    Apply = (run, rng) =>
+                    {
+                        var region = run.NodeRegion;
+                        var champion = region.Elites[rng.Next(region.Elites.Length)];
+                        return Fight(run, champion, "The ghost steps aside, and its champion steps out of the dark.");
+                    },
+                },
+                new()
+                {
+                    Label = "Learn from him", Hint = "One random hero deals +8% damage for the rest of the run, but loses 6 max HP.",
+                    Apply = (run, rng) =>
+                    {
+                        var hero = run.Party[rng.Next(run.Party.Count)];
+                        hero.BonusPowerPct += 8;
+                        hero.BonusMaxHp -= 6;
+                        hero.ClampHp();
+                        return $"Hours of drills against a blade that leaves no wound, only cold. {hero.Def.Name} hits harder now [color=#ff6b6b](-6 max HP)[/color].";
+                    },
+                },
+                new() { Label = "Bow and walk on", Hint = "Nothing happens.", Apply = (_, _) => "The ghost returns your bow and fades." },
+            ],
+        },
+        new()
+        {
+            Id = "gambler", Title = "The Bone Dice", Weight = 8,
+            Text = "A grinning skeleton sits at a table of coffin lids, rattling dice in a skull cup. \"Gold or blood, traveller. The bones don't care which.\"",
+            Choices =
+            [
+                new()
+                {
+                    Label = "Wager 40 gold", Hint = "50%: win 40 gold. 50%: lose 40 gold.",
+                    Available = r => r.Gold >= 40,
+                    Apply = (run, rng) =>
+                    {
+                        if (rng.Next(2) == 0) { run.Gold += 40; return "Double sixes. The skeleton slides the coins across, still grinning. [color=#ffd76b](+40 gold)[/color]"; }
+                        run.Gold -= 40;
+                        return "Snake eyes. Bony fingers sweep your gold away. [color=#ff6b6b](-40 gold)[/color]";
+                    },
+                },
+                new()
+                {
+                    Label = "Wager blood", Hint = "Every hero loses 6 HP. 50%: gain a random relic.",
+                    Apply = (run, rng) =>
+                    {
+                        var text = DamageParty(run, 6);
+                        if (rng.Next(2) == 0 && Database.RandomRelic(rng, run.Relics) is { } relic)
+                        {
+                            run.Relics.Add(relic.Id);
+                            return $"{text} The dice come up bright: [color={relic.ColorHex}]{relic.Name}[/color]: {relic.Description}";
+                        }
+                        return $"{text} The bones rattle. Nothing. \"Again sometime,\" it whispers.";
+                    },
+                },
+                new() { Label = "Walk away", Hint = "Nothing happens.", Apply = (_, _) => "The rattling follows you down the corridor." },
+            ],
+        },
         new()
         {
             Id = "shrine", Title = "The Ember Shrine",
@@ -275,7 +349,7 @@ public static class Events
     public static EventDef Pick(Random rng, RunState run)
     {
         int region = run.Node?.Region ?? 0;
-        var pool = All.Concat(Special).Where(e =>
+        var pool = All.Concat(Special).Concat(Rooms).Where(e =>
             (e.Region < 0 || e.Region == region) &&
             !(e.Unique && run.SeenEvents.Contains(e.Id)) &&
             (e.Requires?.Invoke(run) ?? true)).ToList();
@@ -288,6 +362,11 @@ public static class Events
         }
         return All[0];
     }
+
+    // Enemy ids used by event fights (ids, not sprite names). Listed here so Database.Validate can check them.
+    public static readonly string[] AltarGuardians = ["acolyte", "caller", "acolyte"];
+    public static readonly string[] ShadeAmbush = ["wraith", "wraith", "wraith"];
+    public static IEnumerable<string[]> EventFights => [AltarGuardians, ShadeAmbush, ["mimic"], SecretBoss];
 
     private static string Fight(RunState run, string[] enemies, string text)
     {
@@ -317,6 +396,21 @@ public static class Events
                     Available = r => r.Gold >= 60,
                     Apply = (run, _) => { run.Gold -= 60; foreach (var h in run.Party) { h.BonusMaxHp += 8; h.Hp += 8; } return "Rivets, plates, padding. The party feels sturdier."; },
                 },
+                new()
+                {
+                    Label = "Reforge a weapon", Hint = "Trade a plain weapon (equipped or in the bag) for a random weapon with a signature mechanic.",
+                    Available = r => PlainWeapon(r) is not null,
+                    Apply = (run, rng) =>
+                    {
+                        var (hero, oldId) = PlainWeapon(run)!.Value;
+                        var forged = Database.RandomFamilyWeapon(rng, run.MaxTier);
+                        if (forged is null) return "He shrugs. \"Nothing worth forging today.\"";
+                        if (hero is not null) hero.Weapon = forged.Id;
+                        else { run.Equipment.Remove(oldId); run.Equipment.Add(forged.Id); }
+                        string who = hero is not null ? $" {hero.Def.Name.Split(' ')[0]} now wields it." : " It goes into your bag.";
+                        return $"The {Database.Item(oldId).Name} melts in the coals and comes out as [color=#ffc94a]{forged.Name}[/color]: {forged.Description}{who}";
+                    },
+                },
                 new() { Label = "Move on", Hint = "Nothing happens.", Apply = (_, _) => "\"Your loss,\" he grunts, and keeps hammering." },
             ],
         },
@@ -343,7 +437,7 @@ public static class Events
                 new()
                 {
                     Label = "Smash the altar", Hint = "Fight its guardians (elite battle, relic among the rewards).",
-                    Apply = (run, _) => Fight(run, ["cultist", "necromancer", "cultist"], "The guardians rise as the stone cracks!"),
+                    Apply = (run, _) => Fight(run, AltarGuardians, "The guardians rise as the stone cracks!"),
                 },
                 new() { Label = "Leave it", Hint = "Nothing happens.", Apply = (_, _) => "Some things are better left alone." },
             ],
@@ -396,7 +490,7 @@ public static class Events
                 new()
                 {
                     Label = "Face her", Hint = "Fight three wraiths (elite battle, relic among the rewards).",
-                    Apply = (run, _) => Fight(run, ["wraith", "wraith", "wraith"], "\"You left me in the dark!\" The shades descend!"),
+                    Apply = (run, _) => Fight(run, ShadeAmbush, "\"You left me in the dark!\" The shades descend!"),
                 },
                 new()
                 {

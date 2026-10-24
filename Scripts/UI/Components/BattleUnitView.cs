@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text;
 using Godot;
 using TBRPG.Core;
+using TBRPG.Game;
 
 namespace TBRPG.UI;
 
@@ -109,7 +110,9 @@ public partial class BattleUnitView : Control
         _hp.MaxValue = unit.MaxHp;
         _hp.Value = unit.Hp;
         _hp.AddThemeStyleboxOverride("background", Visuals.Box(new Color("#0b0910"), new Color("#0b0910"), 1, 2, 0));
-        _hp.AddThemeStyleboxOverride("fill", BarFill(unit.IsHero ? "UI/bar_hero.png" : "UI/bar_enemy.png"));
+        if (GameSession.Settings.ColorblindMode)   // blue for heroes, orange for enemies: never confused, whatever the colour vision
+            _hp.AddThemeStyleboxOverride("fill", Visuals.Box(new Color(unit.IsHero ? "#56b4e9" : "#e69f00"), new Color(0, 0, 0, 0), 0, 2, 0));
+        else _hp.AddThemeStyleboxOverride("fill", BarFill(unit.IsHero ? "UI/bar_hero.png" : "UI/bar_enemy.png"));
         AddChild(_hp);
 
         _shield.ShowPercentage = false;
@@ -181,9 +184,9 @@ public partial class BattleUnitView : Control
         double breath = 0.7 + GD.Randf() * 0.3;
         idle.TweenProperty(Sprite, "scale", new Vector2(_scale, _scale * 1.04f), breath).SetTrans(Tween.TransitionType.Sine);
         idle.TweenProperty(Sprite, "scale", new Vector2(_scale, _scale), breath).SetTrans(Tween.TransitionType.Sine);
-        switch (Unit.Sprite)
+        switch (Unit.IsHero ? Unit.DefId : Unit.Sprite)
         {
-            case "moth" or "wraith" or "imp" or "wisp" or "harpy" or "phylactery":
+            case "moth" or "wraith" or "imp" or "wisp" or "harpy" or "phylactery" or "tome" or "ink_wraith" or "quill_swarm":
             {
                 // Hovering units bob up and down.
                 var hover = Sprite.CreateTween().SetLoops();
@@ -210,6 +213,18 @@ public partial class BattleUnitView : Control
     public Vector2 Head => Body.GlobalPosition + new Vector2(0, -SpriteHeight - 6);
 
     public void SetOutline(Color color) => SpriteMaterial.SetShaderParameter("outline_color", color);
+
+    /// <summary>Region lighting (see unit.gdshader): ambient multiply, rim light on one side, feet in shadow.</summary>
+    public void SetLighting(Color ambient, Color rim, float rimStrength, float rimSide)
+    {
+        // A sprite drawn mirrored has its texture's left and right swapped.
+        if (Sprite.FlipH) rimSide = -rimSide;
+        SpriteMaterial.SetShaderParameter("ambient", ambient);
+        SpriteMaterial.SetShaderParameter("rim_color", rim);
+        SpriteMaterial.SetShaderParameter("rim_strength", rimStrength);
+        SpriteMaterial.SetShaderParameter("rim_side", rimSide);
+        SpriteMaterial.SetShaderParameter("foot_shade", 0.2f);
+    }
 
     public void SetDeadLook()
     {
@@ -327,6 +342,9 @@ public partial class BattleUnitView : Control
         foreach (var s in u.Statuses)
         {
             var icon = Visuals.Icon(Visuals.StatusIcon(s.Kind), 16);
+            // Every status icon explains itself on hover (effect, duration, stacking rule).
+            icon.MouseFilter = MouseFilterEnum.Stop;
+            icon.TooltipText = Visuals.StatusDescription(s);
             _statuses.AddChild(icon);
             if (s.Kind is StatusKind.Poison or StatusKind.Burn or StatusKind.Bleed or StatusKind.Regen)
                 _statuses.AddChild(Visuals.Label(s.Amount.ToString(), 11, Visuals.Text, outline: 3));
@@ -338,7 +356,7 @@ public partial class BattleUnitView : Control
             _intent.Text = IntentText(battle);
             SetCharging(u.IsAlive && (u.Intent is { Charging: true } || u.ChargedMove is not null));
         }
-        TooltipText = BuildTooltip();
+        TooltipText = BuildTooltip(battle);
         if (!u.IsAlive) SetDeadLook();
     }
 
@@ -349,14 +367,28 @@ public partial class BattleUnitView : Control
         if (e.Has(StatusKind.Stun)) return $"{Visuals.Img(Visuals.StatusIcon(StatusKind.Stun))} [color=#ffd76b][b]Stunned[/b][/color]\n[color=#a99f8f]skips its turn[/color]";
         if (battle.IsDoomed(e))
             return $"{Visuals.Img("UI/icon_heal_ally.png", 13)} [color=#ff7070][b]Doomed![/b][/color]\n[color=#a99f8f]will be devoured, won't act[/color]";
-        if (e.Intent is not { } intent) return "[color=#5e566a]—[/color]";
+        // No plan right now: it already acted this round, or it just arrived (summons and split shards act next round).
+        if (e.Intent is not { } intent) return "[color=#7d7590]Waiting\nacts next round[/color]";
         var move = intent.Move;
         string weakPoint = e.ExposedElement is Element ex
-            ? $"\n{Visuals.Img(Visuals.ElementIcon(ex), 13)} [color=#ffd76b]Weak point: {ex}[/color]" : "";
+            ? e.ExposedElement2 is Element ex2
+                ? $"\n{Visuals.Img(Visuals.ElementIcon(ex), 13)}{Visuals.Img(Visuals.ElementIcon(ex2), 13)} [color=#ffd76b]Weak points: {ex} + {ex2}[/color]"
+                : $"\n{Visuals.Img(Visuals.ElementIcon(ex), 13)} [color=#ffd76b]Weak point: {ex}[/color]"
+            : "";
         if (battle.IsWarded(e)) weakPoint += $"\n{Visuals.Img("UI/icon_shield.png", 13)} [color=#8fd0ff]Warded: break the Phylactery![/color]";
+        if (e.Enemy?.AdaptiveResist == true && e.AdaptedTo is { } adapted)
+            weakPoint += $"\n{Visuals.Img(Visuals.ElementIcon(adapted), 13)} [color=#c070ff]Adapted: {adapted} (-40%)[/color]";
+        if (battle.FeedersOf(e) is > 0 and var pods)
+            weakPoint += $"\n{Visuals.Img("UI/icon_regen.png", 13)} [color=#b3d05a]Fed by {pods} pod{(pods > 1 ? "s" : "")} (+{e.Enemy!.RegrowPct * pods}%/round)[/color]";
         if (intent.Charging)
         {
-            string advice = move.Target == MoveTarget.FrontOnly ? "Pull the front row back!" : "Break it!";
+            string advice = move.Target switch
+            {
+                MoveTarget.FrontOnly => "Pull the front row back!",
+                MoveTarget.BackOnly => "Move the back row forward!",
+                MoveTarget.Branded => "Hits every BRANDED hero: cleanse, shield or defend them!",
+                _ => "Break it!",
+            };
             return $"{Visuals.Img("UI/icon_charging.png")} [color=#ffa040][b]Charging![/b][/color]\n[color=#ffa040]{move.Name}[/color] [color=#a99f8f]next round. {advice}[/color]{weakPoint}";
         }
 
@@ -367,8 +399,10 @@ public partial class BattleUnitView : Control
             MoveTarget.Hero or MoveTarget.Ally => first,
             MoveTarget.FrontRow => "front row",
             MoveTarget.FrontOnly => targets.Count == 0 ? "nobody (front row empty)" : "FRONT ROW",
+            MoveTarget.BackOnly => targets.Count == 0 ? "nobody (back row empty)" : "BACK ROW",
             MoveTarget.BackRow => "back row",
             MoveTarget.AllHeroes => "ALL",
+            MoveTarget.Branded => targets.Count == 0 ? "branded (none)" : $"BRANDED ({targets.Count})",
             MoveTarget.AllAllies => "allies",
             _ => "self",
         };
@@ -387,27 +421,34 @@ public partial class BattleUnitView : Control
             case MoveKind.Defend: line.Append($"{Visuals.Img("UI/icon_defending.png", 13)}Defend +{power}"); break;
             case MoveKind.Summon: line.Append($"{Visuals.Img("UI/icon_summon.png", 13)}Summon"); break;
             case MoveKind.Consume: line.Append($"{Visuals.Img("UI/icon_heal_ally.png", 13)}Devour [color=#ffb0b0]{first}[/color], heal {power}"); break;
-            case MoveKind.Usurp: line.Append($"{Visuals.Img("UI/icon_weakened.png", 13)}Steal [color=#ffb0b0]{first}[/color]'s best skill"); break;
+            case MoveKind.Usurp:
+                string sealedName = targets.FirstOrDefault() is { } victim && battle.UsurpTarget(victim) is { } sealedSkill ? sealedSkill.Def.Name : "best skill";
+                line.Append($"{Visuals.Img("UI/icon_weakened.png", 13)}Seal [color=#ffb0b0]{first}[/color]'s [b]{sealedName}[/b]");
+                break;
         }
         foreach (var apply in move.Applies) line.Append(Visuals.Img(Visuals.StatusIcon(apply.Kind), 13));
         string name = move.Melee ? $"[b]{move.Name}[/b] [color=#a99f8f](melee)[/color]" : $"[b]{move.Name}[/b]";
         return $"{name}\n{line}{weakPoint}";
     }
 
-    private string BuildTooltip()
+    private string BuildTooltip(Battle battle)
     {
         var u = Unit;
         var sb = new StringBuilder();
         sb.AppendLine($"{u.Name}   HP {u.Hp}/{u.MaxHp}");
         sb.AppendLine($"Armor {u.Armor}  ·  Speed {u.Speed}  ·  Crit {u.Crit}%  ·  Dodge {u.Dodge}%  ·  {u.Row} row");
         if (u.IsHero && u.ResourceDef is not null) sb.AppendLine($"{u.ResourceDef.Name}: {u.Resource}/{u.MaxResource}");
+        if (u.IsHero && u.WeaponEffect is not null) sb.AppendLine("Weapon: " + Database.WeaponEffectText(u.WeaponEffect));
         if (u.IsHero && u.Traits.Count > 0)
             sb.AppendLine("Traits: " + string.Join(", ", u.Traits.Where(Database.HasTraitDef).Select(t => Database.Trait(t).Name)));
         if (!u.IsHero)
         {
             sb.AppendLine(Visuals.AffinityText(u));
             sb.AppendLine(u.Broken ? "BROKEN: stunned, takes double damage." : $"Break meter: {u.Break}/{u.BreakMax} (hit weaknesses to deplete)");
+            if (u.IsBoss) sb.AppendLine("Bosses can't be stunned by abilities, and their break meter grows (up to +2) each time they recover.");
             if (EnemyMods.Get(u.Modifier) is { } mod) sb.AppendLine(mod.Description);
+            foreach (var combo in battle.PrimedCombos(u))
+                sb.AppendLine($"COMBO READY: hit it with {combo.Payoff} (another hero) for {combo.Name}.");
             if (u.Enemy is not null) sb.AppendLine(u.Enemy.Blurb);
         }
         foreach (var s in u.Statuses) sb.AppendLine("• " + Visuals.StatusDescription(s));

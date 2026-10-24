@@ -18,7 +18,7 @@ public partial class MapScene : Screen
             return;
         }
         var region = run.CurrentRegionDef;
-        string intro = Story.RegionIntroId(region.Index);
+        string intro = Story.RegionIntroId(run, run.CurrentRegion);
         if (!run.SeenScenes.Contains(intro))
         {
             GameSession.PlayCutscene(GetTree(), intro, GameSession.AfterCutscene.Map);
@@ -37,7 +37,7 @@ public partial class MapScene : Screen
         top.AddChild(bar);
         bar.AddChild(Visuals.Title(region.Name, 24));
         int floor = run.CurrentNode < 0 ? 0 : run.Floor + (run.NodeCompleted ? 1 : 0);
-        var floorLabel = Visuals.Label($"Region {region.Index + 1}/{DungeonMap.RegionCount} · Floor {System.Math.Min(floor + 1, DungeonMap.Floors)}/{DungeonMap.Floors}", 15, Visuals.Text);
+        var floorLabel = Visuals.Label($"Region {run.CurrentRegion + 1}/{DungeonMap.RegionCount} · Floor {System.Math.Min(floor + 1, DungeonMap.Floors)}/{DungeonMap.Floors}", 15, Visuals.Text);
         floorLabel.TooltipText = region.Subtitle;
         floorLabel.MouseFilter = MouseFilterEnum.Stop;
         bar.AddChild(floorLabel);
@@ -47,6 +47,20 @@ public partial class MapScene : Screen
             dl.TooltipText = dailyMod.Description;
             dl.MouseFilter = MouseFilterEnum.Stop;
             bar.AddChild(dl);
+        }
+        if (run.Weekly is not null)
+        {
+            var wl = Visuals.Label($"Weekly: {string.Join(" · ", run.Mutators.Select(m => Weekly.Get(m)?.Name ?? m))}", 14, Visuals.Ember);
+            wl.TooltipText = string.Join("\n", run.Mutators.Select(m => Weekly.Get(m) is { } d ? $"{d.Name}: {d.Description}" : m));
+            wl.MouseFilter = MouseFilterEnum.Stop;
+            bar.AddChild(wl);
+        }
+        if (run.Loop > 0)
+        {
+            var el = Visuals.Label($"Endless loop {run.Loop + 1}", 15, Visuals.Bad);
+            el.TooltipText = $"Enemies: +{(int)(Endless.HpPerLoop * 100 * run.Loop)}% HP, +{(int)(Endless.DamagePerLoop * 100 * run.Loop)}% damage. Depth {Endless.Depth(run)}.";
+            el.MouseFilter = MouseFilterEnum.Stop;
+            bar.AddChild(el);
         }
         if (run.Heat > 0)
         {
@@ -65,7 +79,7 @@ public partial class MapScene : Screen
         foreach (var id in run.Relics.Where(Database.HasRelicDef))
         {
             var relic = Database.Relic(id);
-            var icon = Visuals.Icon("UI/icon_relic.png", 24, $"{relic.Name}\n{relic.Description}");
+            var icon = Visuals.Icon("UI/icon_relic.png", 24, $"{relic.Name}\n{relic.Description}{(relic.Curse is { } curse ? $"\nCurse: {curse}" : "")}");
             icon.Modulate = new Color(relic.ColorHex);
             relics.AddChild(icon);
         }
@@ -136,7 +150,7 @@ public partial class MapScene : Screen
         var inner = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, MouseFilter = MouseFilterEnum.Ignore };
         inner.SetAnchorsPreset(LayoutPreset.FullRect);
         strip.AddChild(inner);
-        var small = Visuals.Label($"REGION {region.Index + 1}", 16, Visuals.Ember);
+        var small = Visuals.Label($"REGION {(GameSession.Run?.CurrentRegion ?? region.Index) + 1}", 16, Visuals.Ember);
         small.HorizontalAlignment = HorizontalAlignment.Center;
         var title = Visuals.Title(region.Name, 46);
         title.HorizontalAlignment = HorizontalAlignment.Center;

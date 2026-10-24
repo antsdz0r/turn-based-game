@@ -70,7 +70,7 @@ public static partial class Database
         new("sable_dread", "hexer", "Dread", "Weakened enemies deal 40% less damage instead of 25%."),
         new("sable_harvest", "hexer", "Soul Harvest", "+1 Hex every turn."),
         new("sable_reach", "hexer", "Shared Siphon", "Sable's lifesteal heals every hero, not just her."),
-    };
+    }.Concat(TraitsPack2).ToList();
 
     public static bool HasTraitDef(string id) => AllTraits.Any(t => t.Id == id);
     public static TraitDef Trait(string id) => AllTraits.First(t => t.Id == id);

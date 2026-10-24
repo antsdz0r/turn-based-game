@@ -47,6 +47,7 @@ public partial class BattleScene : Screen
     private PanelContainer? _itemMenu;
     private readonly List<(Godot.Button button, Action action)> _hotkeys = new();
     private bool _introPlayed;
+    private bool _killCamDone;
     private readonly Random _barkRng = new();
     private Combatant? _lastActor;
     private double _lastBark = -10;
@@ -57,10 +58,12 @@ public partial class BattleScene : Screen
         _run = GameSession.Run ?? GameSession.EnsureRun();
         var node = _run.Node;
         AddRegionBackdrop(_run.NodeRegion, node?.Type == NodeType.Boss ? 0.8f : 1f);
+        BattleLook.AddBehindUnits(this, Backdrop, _run.NodeRegion.Key);
 
         _field = new Control { MouseFilter = MouseFilterEnum.Ignore };
         _field.SetAnchorsPreset(LayoutPreset.FullRect);
         AddChild(_field);
+        BattleLook.AddInFront(this, _run.NodeRegion.Key);      // silhouettes + vignette between the units and the effects
         _fx = new Control { MouseFilter = MouseFilterEnum.Ignore };
         _fx.SetAnchorsPreset(LayoutPreset.FullRect);
         AddChild(_fx);
@@ -92,22 +95,100 @@ public partial class BattleScene : Screen
 
         // Battle
         var setup = _run.CreateBattle();
+        var resume = _run.ActiveBattle?.Commands.ToList() ?? new List<BattleCommand>();
         _battle = new Battle(setup);
         _battle.Happened += e => _events.Enqueue(e);
         _battle.Logged += line => _log.AppendText(line + "\n");
-        foreach (var unit in _battle.Heroes.Concat(_battle.Enemies)) AddView(unit);
+        // A battle saved mid-fight is rebuilt by replaying its commands (silently), then play continues from there.
+        bool resumed = resume.Count > 0 && _battle.StartAndReplay(resume) > 0;
+        if (resumed)
+        {
+            _introPlayed = true;
+            _log.AppendText("[color=#8fb3ff]— Battle resumed —[/color]\n");
+        }
+        _battle.CommandRecorded += () =>
+        {
+            if (_run.ActiveBattle is null || _battle.IsOver) return;
+            _run.ActiveBattle.Commands = _battle.Commands.ToList();
+            GameSession.SaveRun();
+        };
+        foreach (var unit in _battle.Heroes.Concat(_battle.Enemies.Where(e => e.IsAlive || !resumed))) AddView(unit);
         LayoutUnits(animate: false);
+        BuildObjectives();
         GetViewport().SizeChanged += () => { if (IsInstanceValid(this) && IsInsideTree()) LayoutUnits(animate: false); };
 
+        // Boss fights switch to the boss's own theme during its entrance (see BossEntrance).
         bool boss = _battle.Enemies.Any(e => e.IsBoss);
-        Audio.Music(this, boss ? "boss" : _run.NodeRegion.Music);
+        if (!boss) Audio.Music(this, _run.NodeRegion.Music);
         Visuals.FadeIn(this, 0.4);
 
         if (GameSession.Profile.MarkSeen(_battle.Enemies.Select(e => e.DefId))) GameSession.SaveProfile();
 
-        _battle.Start();
+        if (!resumed) _battle.Start();
+        else Toast("Battle resumed where you left off.");
         RunLoop();
         if (!GameSession.Profile.TutorialSeen) ShowTips();
+        else ShowOpeningHints();
+    }
+
+    /// <summary>One-time hints for mechanics a fight introduces (each shown once per profile).</summary>
+    private void ShowOpeningHints()
+    {
+        if (_battle.Enemies.Any(e => e.Modifier is not null))
+            Hint("modifier", "This enemy carries a [b]modifier[/b] (its name prefix). Hover it to read what it does: Thorned punishes melee, Splitting breaks apart on death, Vampiric heals itself...");
+        if (_battle.Enemies.Any(e => e.Enemy?.ProtectedBy is not null))
+            Hint("warded", "The boss is [b]Warded[/b] while its protector stands: it takes 60% less damage. Destroy the protector first.");
+        if (_battle.Enemies.Any(e => e.Enemy?.ShiftingWeakPoint == true))
+            Hint("weakpoint", "Its [b]weak point[/b] changes every round (shown on its bubble). Hitting it deals double damage and extra break.");
+        if (_battle.Enemies.Any(e => e.Enemy?.RegrowFrom is not null))
+            Hint("regrow", "The boss is [b]fed by its seed pods[/b]: every living pod heals it each round. Pop the pods to stop the healing.");
+        if (_battle.Enemies.Any(e => e.Enemy?.AdaptiveResist == true))
+            Hint("adaptive", "This boss [b]adapts[/b]: the element that hit it last deals 40% less damage. Alternate fire, ice, lightning and physical attacks.");
+        if (_battle.Enemies.Any(e => e.DefId == "spore_puffer"))
+            Hint("spores", "The [b]Spore Puffer[/b] bursts when it dies, poisoning your front row. Finish it with a ranged hero, or be ready to cleanse.");
+        if (_battle.Heroes.Any(h => h.WeaponEffect is not null))
+            Hint("weapon", "A hero wields a [b]weapon family[/b]. Its effect is shown under the hero's HP when it's their turn and in their tooltip.");
+    }
+
+    private VBoxContainer? _hintBox;
+
+    /// <summary>A small dismissable hint in the top-right corner, shown once per profile per id.</summary>
+    private void Hint(string id, string text)
+    {
+        var profile = GameSession.Profile;
+        if (profile.SeenHints.Contains(id)) return;
+        profile.SeenHints.Add(id);
+        GameSession.SaveProfile();
+
+        if (_hintBox is null || !IsInstanceValid(_hintBox))
+        {
+            _hintBox = new VBoxContainer { MouseFilter = MouseFilterEnum.Ignore };
+            _hintBox.AddThemeConstantOverride("separation", 6);
+            _hintBox.SetAnchorsPreset(LayoutPreset.TopRight);
+            _hintBox.GrowHorizontal = GrowDirection.Begin;
+            _hintBox.OffsetTop = 64;
+            _hintBox.OffsetRight = -16;
+            AddChild(_hintBox);
+        }
+        var panel = new PanelContainer { CustomMinimumSize = new Vector2(360, 0), MouseFilter = MouseFilterEnum.Stop };
+        panel.AddThemeStyleboxOverride("panel", Visuals.Box(new Color(0.08f, 0.06f, 0.1f, 0.94f), Visuals.Ember, 2, 8, 10));
+        var box = new VBoxContainer();
+        panel.AddChild(box);
+        box.AddChild(Visuals.Label("TIP  (click to dismiss)", 12, Visuals.Ember));
+        var body = Visuals.Rich(text, 14);
+        body.CustomMinimumSize = new Vector2(340, 0);
+        box.AddChild(body);
+        panel.GuiInput += e =>
+        {
+            if (e is InputEventMouseButton { Pressed: true }) panel.QueueFree();
+        };
+        _hintBox.AddChild(panel);
+        Pause?.MoveToFront();
+        // Fades away by itself after a while.
+        var tween = panel.CreateTween();
+        tween.TweenInterval(14);
+        tween.TweenProperty(panel, "modulate:a", 0f, 0.6);
+        tween.TweenCallback(Callable.From(panel.QueueFree));
     }
 
     /// <summary>First-battle tips. Shown once per profile (also in How to Play).</summary>
@@ -130,7 +211,7 @@ public partial class BattleScene : Screen
             "At zero it is [b]BROKEN[/b]: stunned, its attack cancelled, [b]double[/b] damage taken.\n" +
             "• [color=#ffa040]Charging[/color] enemies unleash a big attack next round: break or interrupt them!\n" +
             "• Melee can only reach the [b]front row[/b] while it stands. Hover actions to preview damage.\n" +
-            "• Press [b]SPACE[/b] when the rings meet to parry (turn off in Settings).", 14));
+            $"• Parry: each enemy attack has 2-3 beats. Press [b]{Keybinds.Name("parry")}[/b] each time a ring meets the gold ring. All perfect = no damage and a counterattack; all good = -40%; one miss = full damage. Pressing early fails the beat (turn off in Settings).", 14));
         box.AddChild(Visuals.Button("Got it", () =>
         {
             GameSession.Profile.TutorialSeen = true;
@@ -173,7 +254,7 @@ public partial class BattleScene : Screen
                     {
                         PopText(_views[enemy], enemy.Intent?.Move.Name ?? "", Visuals.Text, 18, -20);
                         Engine.TimeScale = 1.0;
-                        defense = await _timing.Run(targetView.Center);
+                        defense = await _timing.Run(targetView.Center, enemy.Intent is { } pending ? Battle.ParryBeats(enemy, pending.Move) : 2);
                         Engine.TimeScale = Speed;
                     }
                 }
@@ -250,7 +331,7 @@ public partial class BattleScene : Screen
             return;
         }
         var item = Database.Item(_battle.Consumables[index]);
-        if (item.TargetsAlly)
+        if (item.NeedsTarget)
         {
             _pendingItem = index;
             _pendingAbility = null;
@@ -320,7 +401,7 @@ public partial class BattleScene : Screen
         bool targeting = _pendingAbility is not null || _pendingItem >= 0;
         if (targeting && _targets.Count > 0)
         {
-            if (key.Keycode is Key.Tab or Key.Right or Key.Down or Key.Left or Key.Up)
+            if (Keybinds.Is(key, "next_target") || key.Keycode is Key.Right or Key.Down or Key.Left or Key.Up)
             {
                 int dir = key.Keycode is Key.Left or Key.Up ? -1 : 1;
                 int index = _hover is null ? 0 : (_targets.IndexOf(_hover) + dir + _targets.Count) % _targets.Count;
@@ -329,7 +410,7 @@ public partial class BattleScene : Screen
                 GetViewport().SetInputAsHandled();
                 return;
             }
-            if (key.Keycode is Key.Enter or Key.KpEnter or Key.Space && ActiveHero is { } hero)
+            if ((Keybinds.Is(key, "confirm") || key.Keycode == Key.Space) && ActiveHero is { } hero)
             {
                 ConfirmTarget(hero, _hover ?? _targets[0]);
                 GetViewport().SetInputAsHandled();
@@ -337,8 +418,13 @@ public partial class BattleScene : Screen
             }
         }
 
-        long code = (long)key.Keycode;
-        int number = code >= (long)Key.Key1 && code <= (long)Key.Key9 ? (int)(code - (long)Key.Key1) : -1;
+        if (Keybinds.Is(key, "speed") && _speedButton is not null)
+        {
+            _speedButton.EmitSignal(BaseButton.SignalName.Pressed);
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        int number = Keybinds.ActionIndex(key);
         if (number >= 0 && number < _hotkeys.Count)
         {
             var (button, action) = _hotkeys[number];
@@ -367,7 +453,14 @@ public partial class BattleScene : Screen
                     break;
                 case ActionEvent a:
                     _lastActor = a.Actor;
+                    if (!a.Actor.IsHero)
+                    {
+                        if (a.Big || _barkRng.Next(100) < 40) PlayVoice(a.Actor, VoiceCue.Attack);
+                        MobSpeak(a.Actor, MobCue.Attack, a.Big ? 45 : 14);
+                    }
+                    if (a.Finisher) await FinisherIntro(a);
                     await PlayAction(a);
+                    if (a.Finisher) FinisherOutro();
                     break;
                 case HitEvent h: await PlayHit(h); break;
                 case MissEvent m:
@@ -384,6 +477,8 @@ public partial class BattleScene : Screen
                     break;
                 case StatusEvent st:
                     View(st.Target).Refresh(_battle, hp: false);
+                    if (st.Applied && st.Kind == StatusKind.Marked && st.Target.IsHero)
+                        Hint("mark", "A hero is [b]Marked[/b]: they take +25% damage, and some enemies aim their big attacks at marked heroes. A cleanse (Panacea, healer abilities) removes it.");
                     if (st.Applied && st.Kind is not (StatusKind.Shield or StatusKind.Defending))
                     {
                         PopText(View(st.Target), Visuals.StatusName(st.Kind), StatusColor(st.Kind), 16, -30);
@@ -401,15 +496,23 @@ public partial class BattleScene : Screen
                     break;
                 case BreakEvent b:
                     await PlayBreak(b);
+                    Hint("break", "[b]BROKEN![/b] A broken enemy loses its next turn (its attack is cancelled) and takes [b]double damage[/b]. Pile on now!");
                     if (_barkRng.Next(100) < 45 && RandomHero() is { } cheer) Say(cheer, Story.BreakBark(_barkRng));
                     break;
                 case DeathEvent d:
+                    if (!d.Unit.IsHero && !_killCamDone && !_battle.AliveEnemies.Any() && _events.All(ev => ev is not DeathEvent { Unit.IsHero: false })
+                        && _views.TryGetValue(d.Unit, out var lastView))
+                    {
+                        _killCamDone = true;   // only the very last enemy to fall gets the kill-cam
+                        await KillCam(lastView);
+                    }
                     await PlayDeath(d.Unit);
                     if (!d.Unit.IsHero && _lastActor is { IsHero: true } killer && _barkRng.Next(100) < 35)
                         Say(killer, Story.KillBark(killer.DefId, _barkRng));
                     break;
                 case SummonEvent s: await PlaySummon(s.Unit); break;
                 case ChargeEvent c:
+                    Hint("charge", "An enemy is [b]charging[/b] a big attack for next round. Answers: break it, interrupt it, Defend, shield the target, move out of a row attack, or kill it first.");
                     Audio.Sfx(this, "charge", 0.02f);
                     View(c.Unit).Refresh(_battle, hp: false);
                     PopText(View(c.Unit), $"Charging {c.MoveName}!", Visuals.Ember, 20, -40);
@@ -417,6 +520,7 @@ public partial class BattleScene : Screen
                     await Wait(0.6);
                     break;
                 case PhaseChangeEvent p:
+                    Hint("phase", "The boss entered [b]phase 2[/b]: its weaknesses and moves changed. Hover it to read its new weaknesses before you attack.");
                     Audio.Sfx(this, "break", 0.02f);
                     Shake(18);
                     Flash(View(p.Unit), Visuals.Ember, 1f);
@@ -431,6 +535,21 @@ public partial class BattleScene : Screen
                 case IntentsChangedEvent:
                     foreach (var v in _views.Values.Where(v => !v.Unit.IsHero)) v.Refresh(_battle, hp: false);
                     break;
+                case ComboEvent combo:
+                {
+                    var comboView = View(combo.Target);
+                    var comboColor = new Color(combo.ColorHex);
+                    Audio.Sfx(this, "break", 0.05f, 0.9f);
+                    Shake(9);
+                    Flash(comboView, comboColor, 0.8f);
+                    Burst(comboView.Center, comboColor, 40, Vector2.Up, 120, 320, 0.8, gravity: 200);
+                    PopText(comboView, $"{combo.Name.ToUpperInvariant()}!", comboColor, 34, -70);
+                    if (RandomHero() is { } comboFan && _barkRng.Next(100) < 50) Say(comboFan, "Combo!", force: false);
+                    Hint("combo", $"[b]Team combo![/b] One hero sets up a status, ANOTHER hero cashes it in with the right element:\n" +
+                        string.Join("\n", Combos.All.Select(def => $"• [color={def.ColorHex}]{def.Name}[/color]: {def.Description}")));
+                    await Wait(0.45);
+                    break;
+                }
                 case BattleEndEvent: break;
             }
         }
@@ -442,6 +561,11 @@ public partial class BattleScene : Screen
         foreach (var v in _views.Values)
         {
             if (!v.Unit.IsAlive) continue;
+            if (v.Unit.IsBoss)
+            {
+                v.Body.Modulate = new Color(0, 0, 0, 0);     // the boss waits in the dark for its entrance
+                continue;
+            }
             float from = v.Unit.IsHero ? -260 : 260;
             v.Body.Position = v.Home + new Vector2(from, 0);
             var t = v.Body.CreateTween();
@@ -450,6 +574,12 @@ public partial class BattleScene : Screen
         }
         await Wait(0.65);
         if (RandomHero() is { } talker && _barkRng.Next(100) < 75) Say(talker, Story.StartBark(talker.DefId, _barkRng), force: true);
+        var taunter = _battle.Enemies.Where(e => !e.IsBoss && !e.IsElite && e.IsAlive).OrderBy(_ => _barkRng.Next()).FirstOrDefault();
+        if (taunter is not null && _barkRng.Next(100) < 55)
+        {
+            await Wait(0.45);
+            MobSpeak(taunter, MobCue.Taunt, 100);
+        }
         var elite = _battle.Enemies.FirstOrDefault(e => e.IsElite);
         if (elite is not null && Story.EnemyBark(elite.DefId, false) is { } eliteLine)
         {
@@ -457,19 +587,118 @@ public partial class BattleScene : Screen
             Say(elite, eliteLine, force: true);
         }
         var boss = _battle.Enemies.FirstOrDefault(e => e.IsBoss);
-        if (boss is not null && _views.TryGetValue(boss, out var bossView))
+        if (boss is not null && _views.TryGetValue(boss, out var bossView)) await BossEntrance(boss, bossView);
+    }
+
+    /// <summary>
+    /// A boss arrives: letterbox bars close in, the boss rises out of the dark as a silhouette in its region's
+    /// way (from the ground, the water, a blizzard, a lightning strike, an eruption), its theme starts, it roars,
+    /// and a title card names it and hints at its mechanic.
+    /// </summary>
+    private async Task BossEntrance(Combatant boss, BattleUnitView view)
+    {
+        var region = _run.NodeRegion;
+        string theme = $"boss_{region.Key}";
+        Audio.Music(this, ResourceLoader.Exists($"res://Audio/Music/{theme}.ogg") ? theme : "boss");
+
+        // Letterbox.
+        var vp = GetViewportRect().Size;
+        var bars = new[] { new ColorRect { Color = Colors.Black }, new ColorRect { Color = Colors.Black } };
+        foreach (var bar in bars)
         {
-            Audio.Sfx(this, "growl", 0f, 1f);
-            Shake(14f);
-            Flash(bossView, Visuals.Ember, 0.9f);
-            var roar = bossView.Body.CreateTween();
-            roar.TweenProperty(bossView.Body, "scale", new Vector2(1.18f, 0.88f), 0.12);
-            roar.TweenProperty(bossView.Body, "scale", new Vector2(0.95f, 1.08f), 0.12);
-            roar.TweenProperty(bossView.Body, "scale", Vector2.One, 0.2);
-            Burst(bossView.Center, Visuals.Ember, 50, Vector2.Up, 80, 260, 1.0, gravity: -60);
-            await ShowBanner(boss.Name, 1.2, Visuals.Ember);
-            Say(boss, Story.EnemyBark(boss.DefId, false), force: true);
+            bar.MouseFilter = MouseFilterEnum.Ignore;
+            bar.Size = new Vector2(vp.X, 0);
+            AddChild(bar);
         }
+        bars[1].Position = new Vector2(0, vp.Y);
+        var close = CreateTween().SetParallel();
+        close.TweenProperty(bars[0], "size:y", vp.Y * 0.11f, 0.4);
+        close.TweenProperty(bars[1], "size:y", vp.Y * 0.11f, 0.4);
+        close.TweenProperty(bars[1], "position:y", vp.Y * 0.89f, 0.4);
+        await Wait(0.45);
+
+        // The arrival, in the region's own way.
+        var (color, rise) = region.Key switch
+        {
+            "drowned" => (new Color("#6fd0c0"), 140f),
+            "frost" => (new Color("#d8f4ff"), 0f),
+            "storm" => (new Color("#d9b8ff"), 0f),
+            "cinder" => (new Color("#ff8a2c"), 90f),
+            "garden" => (new Color("#b3d05a"), 120f),
+            "archive" => (new Color("#c070ff"), 0f),
+            _ => (new Color("#b0aec8"), 110f),
+        };
+        view.Body.Position = view.Home + new Vector2(0, rise);
+        Audio.Sfx(this, region.Key == "storm" ? "break" : "charge", 0f, 1f);
+        if (region.Key == "storm" && !GameSession.Settings.ReduceMotion)
+        {
+            var white = new ColorRect { Color = new Color(1, 1, 1, 0.9f), MouseFilter = MouseFilterEnum.Ignore, Size = vp };
+            AddChild(white);
+            var strike = white.CreateTween();
+            strike.TweenProperty(white, "color:a", 0f, 0.5);
+            strike.TweenCallback(Callable.From(white.QueueFree));
+        }
+        Burst(view.Center + new Vector2(0, 40), color, 90, rise > 0 ? Vector2.Up : Vector2.Down, 60, 320, 1.4,
+              gravity: region.Key == "frost" ? 60 : -80);
+        var arrive = view.Body.CreateTween().SetParallel();
+        arrive.TweenProperty(view.Body, "position", view.Home, 1.1).SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.Out);
+        arrive.TweenProperty(view.Body, "modulate", new Color(0, 0, 0, 1), 0.5);
+        Shake(6f);
+        await Wait(1.0);
+
+        // Silhouette → full colour, then the roar.
+        var reveal = view.Body.CreateTween();
+        reveal.TweenProperty(view.Body, "modulate", Colors.White, 0.5);
+        await Wait(0.45);
+        Audio.Sfx(this, "growl", 0f, 1f);
+        Shake(16f);
+        Flash(view, color, 0.9f);
+        var roar = view.Body.CreateTween();
+        roar.TweenProperty(view.Body, "scale", new Vector2(1.18f, 0.88f), 0.12);
+        roar.TweenProperty(view.Body, "scale", new Vector2(0.95f, 1.08f), 0.12);
+        roar.TweenProperty(view.Body, "scale", Vector2.One, 0.2);
+        Burst(view.Center, color, 50, Vector2.Up, 80, 260, 1.0, gravity: -60);
+
+        // Title card.
+        var card = new VBoxContainer { MouseFilter = MouseFilterEnum.Ignore, Alignment = BoxContainer.AlignmentMode.Center };
+        card.AddThemeConstantOverride("separation", 4);
+        var name = Visuals.Title(boss.Name, 52);
+        name.HorizontalAlignment = HorizontalAlignment.Center;
+        name.AddThemeColorOverride("font_color", color.Lightened(0.2f));
+        card.AddChild(name);
+        if (boss.Enemy?.Epithet is { } epithet)
+        {
+            var sub = Visuals.Label(epithet.ToUpperInvariant(), 18, Visuals.Ember);
+            sub.HorizontalAlignment = HorizontalAlignment.Center;
+            card.AddChild(sub);
+        }
+        if (boss.Enemy?.MechanicHint is { } hint)
+        {
+            var tip = Visuals.Label(hint, 15, Visuals.TextDim);
+            tip.HorizontalAlignment = HorizontalAlignment.Center;
+            card.AddChild(tip);
+        }
+        AddChild(card);
+        card.ResetSize();
+        card.Position = new Vector2((vp.X - card.Size.X) / 2, vp.Y * 0.2f);
+        card.Modulate = new Color(1, 1, 1, 0);
+        var show = card.CreateTween();
+        show.TweenProperty(card, "modulate:a", 1f, 0.3);
+        show.Parallel().TweenProperty(card, "position:y", vp.Y * 0.17f, 0.4).SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
+        show.TweenInterval(2.2);
+        show.TweenProperty(card, "modulate:a", 0f, 0.4);
+        show.TweenCallback(Callable.From(card.QueueFree));
+        await Wait(0.6);
+        Say(boss, Story.EnemyBark(boss.DefId, false), force: true);
+        await Wait(2.0);
+
+        // Lift the letterbox.
+        var open = CreateTween().SetParallel();
+        open.TweenProperty(bars[0], "size:y", 0f, 0.4);
+        open.TweenProperty(bars[1], "size:y", 0f, 0.4);
+        open.TweenProperty(bars[1], "position:y", vp.Y, 0.4);
+        open.Chain().TweenCallback(Callable.From(() => { bars[0].QueueFree(); bars[1].QueueFree(); }));
+        await Wait(0.45);
     }
 
     /// <summary>A speech bubble over a unit's head. Rate-limited so the battlefield never gets chatty.</summary>
@@ -481,6 +710,7 @@ public partial class BattleScene : Screen
         _lastBark = now;
 
         bool enemy = !unit.IsHero;
+        if (enemy) PlayVoice(unit, VoiceCue.Talk);
         var bubble = new PanelContainer { MouseFilter = MouseFilterEnum.Ignore, ZIndex = 20 };
         bubble.AddThemeStyleboxOverride("panel", Visuals.Box(enemy ? new Color("#2a0f12") : new Color("#f3ead6"),
             enemy ? new Color("#ff6a4a") : new Color("#5a4a3a"), 2, 10, 8));
@@ -639,18 +869,38 @@ public partial class BattleScene : Screen
         Audio.Sfx(this, heroHurt ? "hurt" : HitSound(h.Element), 0.1f);
 
         Flash(v, Colors.White, 1f);
-        if (h.Damage > 0) Knockback(v, heavy: h.Crit || h.Damage >= 12);
+        bool heavyHit = h.Crit || h.Damage >= 12;
+        if (h.Damage > 0)
+        {
+            Knockback(v, heavy: heavyHit);
+            HitSquash(v, heavyHit);
+        }
         Burst(v.Center, color, h.Crit ? 30 : 16, Vector2.Up, 120, 280, 0.45);
 
         string number = h.Immune ? "IMMUNE" : h.Damage == 0 && h.Absorbed > 0 ? $"({h.Absorbed})" : h.Damage.ToString();
         if (h.Damage > 0 || h.Immune || h.Absorbed > 0)
             PopText(v, h.Crit ? number + "!" : number, h.Immune ? Visuals.TextDim : color, h.Crit ? 44 : 32, 20,
                     (float)GD.RandRange(-22.0, 22.0));
-        if (h.Crit) PopText(v, "CRITICAL", Visuals.GoldBright, 16, -6);
+        if (h.Crit)
+        {
+            PopText(v, "CRITICAL", Visuals.GoldBright, 16, -6);
+            Shockwave(v.Center, color, 0.6f * v.Unit.Scale);                       // impact ring
+            Burst(v.Center, Visuals.GoldBright, 18, Vector2.Up, 200, 420, 0.35, gravity: 300);   // sparks
+        }
         if (h.Weak) PopText(v, "WEAK!", new Color("#ffa040"), 18, 44);
         if (h.Resisted) PopText(v, "resisted", Visuals.TextDim, 15, 44);
 
-        Shake(h.Crit || h.Damage >= 12 ? 11f : 4f);
+        Shake(heavyHit ? 11f : 4f);
+        if (!heroHurt && h.Target.IsAlive && h.Damage > 0 && (heavyHit || _barkRng.Next(100) < 30))
+        {
+            PlayVoice(h.Target, VoiceCue.Hurt);
+            if (heavyHit) MobSpeak(h.Target, MobCue.Hurt, 18);
+        }
+        if (heavyHit && h.Damage > 0)
+        {
+            CameraPunch(h.Crit ? 0.04f : 0.025f);
+            await HitStop(h.Crit ? 0.08 : 0.05);
+        }
         if (heroHurt && h.Target.IsAlive && h.HpAfter * 100 < h.Target.MaxHp * 30 && _hurtBarked.Add(h.Target))
             Say(h.Target, Story.HurtBark(h.Target.DefId, _barkRng), force: true);
         v.TweenHp(h.HpAfter);
@@ -701,10 +951,8 @@ public partial class BattleScene : Screen
         PopText(v, "BREAK!", new Color("#ffa040"), 52, -50);
         if (b.Interrupted) PopText(v, "Attack interrupted", Visuals.GoldBright, 16, -90);
         v.Refresh(_battle, hp: false);
-        double speed = Engine.TimeScale;
-        Engine.TimeScale = speed * 0.3; // hit stop
-        await Wait(0.05);
-        Engine.TimeScale = speed;
+        CameraPunch(0.05f);
+        await HitStop(0.1);
         await Wait(0.5);
     }
 
@@ -712,6 +960,18 @@ public partial class BattleScene : Screen
     {
         var v = View(unit);
         Audio.Sfx(this, "death");
+        if (!unit.IsHero)
+        {
+            v.TweenHp(0);
+            PlayVoice(unit, VoiceCue.Death);
+            if (_barkRng.Next(100) < 35 && MobLines.Line(unit.DefId, MobCue.Death, _barkRng) is { } lastWords)
+                PopText(v, lastWords, new Color("#c9bfae"), 15, -60);
+            await DissolveDeath(v);
+            v.Refresh(_battle, hp: false);
+            v.Visible = false;
+            LayoutUnits(animate: true);
+            return;
+        }
         Flash(v, new Color("#ff3b3b"), 1f);
         v.TweenHp(0);
         var t = v.Body.CreateTween();
@@ -1021,7 +1281,7 @@ public partial class BattleScene : Screen
     private async Task CastFlourish(BattleUnitView actor, ActionEvent a, Color color)
     {
         var body = actor.Body;
-        switch (a.Actor.Sprite)
+        switch (a.Actor.IsHero ? a.Actor.DefId : a.Actor.Sprite)
         {
             case "imp":
             {
@@ -1075,7 +1335,8 @@ public partial class BattleScene : Screen
                 await Wait(0.18);
                 break;
             }
-            case "necromancer" or "cultist" or "hollow_king" or "colossus" or "lich" or "stormcaller" or "tyrant" or "hexer":
+            case "necromancer" or "cultist" or "hollow_king" or "colossus" or "lich" or "stormcaller" or "tyrant" or "hexer"
+                or "alchemist" or "briar_witch" or "archivist" or "mother_bloom" or "ash_priest":
             {
                 // Arms raised: the body rises and glows.
                 var t = body.CreateTween();
@@ -1112,9 +1373,9 @@ public partial class BattleScene : Screen
     /// <summary>Weaponless monsters: rats and leeches pounce, moths swoop, golems leap and slam.</summary>
     private static string BeastStyle(string sprite) => sprite switch
     {
-        "rat" or "leech" or "ghoul" or "hound" or "mimic" => "pounce",
-        "moth" or "wraith" or "wisp" or "harpy" => "swoop",
-        "golem" or "matriarch" or "construct" => "slam",
+        "rat" or "leech" or "ghoul" or "hound" or "mimic" or "stalker" or "thornling" => "pounce",
+        "moth" or "wraith" or "wisp" or "harpy" or "tome" or "ink_wraith" or "quill_swarm" or "gargoyle" => "swoop",
+        "golem" or "matriarch" or "construct" or "strangler" or "mother_bloom" or "shellback" => "slam",
         _ => "lunge",
     };
 
@@ -1145,6 +1406,7 @@ public partial class BattleScene : Screen
             Audio.Sfx(this, "growl", 0.2f, 0.5f);
             body.Scale = new Vector2(0.85f, 1.2f);
             body.Rotation = 0.35f * dir;
+            TrailDuring(actor, 0.2, new Color("#ff9b9b"), 3);
             await Arc(actor.Home, landing, 70, 0.2);
             body.Rotation = 0;
             body.Scale = new Vector2(1.2f, 0.85f);
@@ -1206,17 +1468,36 @@ public partial class BattleScene : Screen
         "hexer" => "FX/weapon_dagger.png",
         "ranger" or "skeleton_archer" => "FX/weapon_dagger.png",
         "arcanist" or "mage" or "cultist" or "necromancer" => "FX/weapon_mace.png",
+        "spellblade" => "FX/weapon_rapier.png",
+        "alchemist" => "FX/weapon_dagger.png",
+        "briar_witch" => "FX/weapon_scythe.png",
+        "index_golem" => "FX/weapon_hammer.png",
+        _ => null,
+    };
+
+    /// <summary>A hero's equipped signature weapon changes what they swing.</summary>
+    private static string? WeaponForEffect(string? effect) => effect switch
+    {
+        "reach" => "FX/weapon_spear.png",
+        "crush" => "FX/weapon_hammer.png",
+        "reap" => "FX/weapon_scythe.png",
+        "flail" => "FX/weapon_flail.png",
+        "rime_crit" => "FX/weapon_rapier.png",
+        "guardbreaker" or "execution" => "FX/weapon_greatsword.png",
+        "twin" or "blood_price" => "FX/weapon_dagger.png",
+        "oathkeeper" => "FX/weapon_sword.png",
+        "lantern" => "FX/weapon_mace.png",
         _ => null,
     };
 
     private async Task MeleeStrike(BattleUnitView actor, ActionEvent a, float dir, Color color)
     {
         var body = actor.Body;
-        string? weaponPath = WeaponFor(a.Actor.Sprite);
+        string? weaponPath = (a.Actor.IsHero ? WeaponForEffect(a.Actor.WeaponEffect) : null) ?? WeaponFor(a.Actor.IsHero ? a.Actor.DefId : a.Actor.Sprite);
         // Templar uses the vanguard sprite but carries a greatsword.
         if (a.Actor.DefId == "templar") weaponPath = "FX/weapon_greatsword.png";
         bool big = weaponPath == "FX/weapon_greatsword.png" || a.Actor.IsBoss || a.Big;
-        if (weaponPath is null && BeastStyle(a.Actor.Sprite) is var style && style != "lunge")
+        if (weaponPath is null && BeastStyle(a.Actor.IsHero ? a.Actor.DefId : a.Actor.Sprite) is var style && style != "lunge")
         {
             await BeastStrike(actor, a, dir, style);
             return;
@@ -1259,6 +1540,7 @@ public partial class BattleScene : Screen
         // 2) Lunge and swing through.
         Audio.Sfx(this, "swing", 0.08f, big ? 1f : 0.85f);
         double swing = big ? 0.16 : 0.11;
+        TrailDuring(actor, swing + 0.04, a.Actor.IsHero ? new Color("#b4c8ff") : new Color("#ff9b9b"));
         var lunge = body.CreateTween();
         lunge.TweenProperty(body, "position", actor.Home + new Vector2(84 * dir, -10), swing).SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
         lunge.Parallel().TweenProperty(body, "scale", new Vector2(1.15f, 0.9f), swing);
@@ -1375,6 +1657,7 @@ public partial class BattleScene : Screen
 
     private void Shake(float strength)
     {
+        if (GameSession.Settings.ReduceMotion) return;
         _shakeTween?.Kill();
         _shakeTween = CreateTween();
         for (int i = 0; i < 6; i++)
@@ -1463,7 +1746,13 @@ public partial class BattleScene : Screen
 
     private BattleUnitView AddView(Combatant unit)
     {
+        // Never two views for one unit: a layout pass may already have created the view of a unit that was
+        // summoned (or split off) in the same instant, before its own SummonEvent plays.
+        if (_views.TryGetValue(unit, out var existing)) return existing;
         var view = new BattleUnitView(unit);
+        var light = BattleLook.For(_run.NodeRegion.Key);
+        // Heroes stand left and catch the light on their left edge, enemies on their right.
+        view.SetLighting(light.Ambient, light.Rim, unit.IsBoss ? 0.4f : 0.5f, unit.IsHero ? -1f : 1f);
         view.GuiInput += e =>
         {
             if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }) OnUnitClicked(unit);
@@ -1553,6 +1842,11 @@ public partial class BattleScene : Screen
         if (p.Weak) parts.Add("[color=#ffa040]WEAK[/color]");
         if (p.Resisted) parts.Add("[color=#a99f8f]resist[/color]");
         if (p.Breaks) parts.Add("[color=#ffd76b][b]BREAKS![/b][/color]");
+        // Team combo: would this hit cash in another hero's setup?
+        if (ability.Def.TargetsEnemies && ability.Def.Power > 0
+            && Enumerable.Range(0, ability.Def.HitCount).Select(ability.Def.HitElement).Distinct()
+                .Select(el => _battle.ComboFor(hero, target, el)).FirstOrDefault(found => found is not null) is { } combo)
+            parts.Add($"[color={combo.ColorHex}][b]{combo.Name.ToUpperInvariant()}![/b][/color]");
         if (p.Lethal && p.Damage > 0) parts.Add("[color=#ff6b6b]KILL[/color]");
         if (p.Heal > 0) parts.Add($"[color=#6be07a]+{Math.Min(p.Heal, target.MaxHp - target.Hp)}[/color]");
         if (p.Shield > 0) parts.Add($"[color=#8fb3ff]+{p.Shield} shield[/color]");
@@ -1653,6 +1947,7 @@ public partial class BattleScene : Screen
         }
         UpdateOutlines();
         _roundLabel.Text = $"Round {_battle.Round}";
+        UpdateObjectives();
         RebuildTurnBar();
         RebuildActions();
     }
@@ -1721,12 +2016,15 @@ public partial class BattleScene : Screen
         if (hero.ResourceDef is { } res)
             _heroBox.AddChild(Visuals.Rich($"[color={res.ColorHex}]{res.Name} {hero.Resource}/{hero.MaxResource}[/color]", 14));
         _heroBox.AddChild(Visuals.Rich($"HP {hero.Hp}/{hero.MaxHp}", 13));
+        if (hero.WeaponEffect is { } weaponEffect)
+            _heroBox.AddChild(Visuals.Rich($"[color=#ffc94a]{Database.WeaponEffectText(weaponEffect)}[/color]", 12));
 
         bool targeting = _pendingAbility is not null || _pendingItem >= 0;
         if (hero.Basic is { } basic) AddAbilityButton(hero, basic, "Attack");
         foreach (var ability in hero.Abilities) AddAbilityButton(hero, ability, null);
 
-        AddActionButton("Defend", "UI/icon_defend.png", "Take -50% damage until your next turn and gain 1 resource.",
+        AddActionButton("Defend", "UI/icon_defend.png", "Take -50% damage until your next turn, gain 1 resource and shake off one Bleed, Burn, Poison, Weakened or Slowed."
+            + (Battle.HasWeapon(hero, "oathkeeper") ? "\nOathkeeper: also readies a Riposte." : ""),
             _battle.CanDefend(hero), "", () => Execute(() => _battle.Defend(hero)));
         _battle.CanMove(hero, out var moveReason);
         AddActionButton(hero.Row == Row.Front ? "Fall back" : "Advance", "UI/icon_move.png",
@@ -1760,7 +2058,9 @@ public partial class BattleScene : Screen
         if (def.Power > 0 || def.PowerPerResource > 0)
         {
             int power = def.EffectivePower(up) + (def.PowerPerResource > 0 ? hero.Resource * def.PowerPerResource : 0);
-            string hits = def.HitCount > 1 ? $"x{def.HitCount}" : "";
+            int hitCount = _battle.HitsFor(hero, def);
+            if (def.IsBasic && Battle.HasWeapon(hero, "twin")) power = (int)Math.Round(power * 0.6);
+            string hits = hitCount > 1 ? $"x{hitCount}" : "";
             var color = Visuals.ElementColor(def.Element).ToHtml(false);
             parts.Add($"{Visuals.Img(Visuals.ElementIcon(def.Element), 12)}[color=#{color}][b]{power}{hits}[/b][/color]"
                       + (def.Target == TargetKind.AllEnemies ? " all" : ""));
@@ -1818,7 +2118,7 @@ public partial class BattleScene : Screen
         top.AddChild(new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill, MouseFilter = MouseFilterEnum.Ignore });
         string resColor = hero.ResourceDef?.ColorHex ?? "#ffd76b";
         string costText = def.PowerPerResource > 0 ? $"[color={resColor}]ALL[/color]"
-            : def.Cost > 0 ? $"[color={resColor}]{new string('◆', def.Cost)}[/color]"
+            : _battle.EffectiveCost(hero, def) > 0 ? $"[color={resColor}]{new string('◆', _battle.EffectiveCost(hero, def))}[/color]"
             : "[color=#7fd4a0]FREE[/color]";
         var costLabel = Visuals.Rich($"[right]{costText}[/right]", 12);
         costLabel.CustomMinimumSize = new Vector2(60, 0);

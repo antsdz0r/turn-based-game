@@ -23,13 +23,24 @@ public static class Story
     public const string KeeperName = "Ilsa, the Last Keeper";
     private const string KeeperTint = "#9fd8ff";
 
-    public static string RegionIntroId(int region) => $"region_{Database.Region(region).Key}";
-    public static string BossIntroId(int region) => $"boss_{Database.Region(region).Key}";
+    public static string RegionIntroId(RunState run, int act) => $"region_{run.RegionAt(act).Key}";
+    public static string BossIntroId(RunState run, int act) => $"boss_{run.RegionAt(act).Key}";
+
+    private static readonly string[] Roman = ["I", "II", "III", "IV", "V"];
     public const string EndingId = "ending";
 
     public static int OfferPrice(int region) => 30 + 15 * region;
 
+    /// <summary>A cutscene, with its "Region N" subtitle numbered by where the region falls in this run.</summary>
     public static Cutscene? Get(string id, RunState run)
+    {
+        var scene = Build(id, run);
+        if (scene is null || !scene.Subtitle.StartsWith("Region ")) return scene;
+        int act = run.RegionOrder.IndexOf(scene.Id.Replace("region_", ""));
+        return act < 0 ? scene : scene with { Subtitle = $"Region {Roman[Math.Clamp(act, 0, Roman.Length - 1)]}" };
+    }
+
+    private static Cutscene? Build(string id, RunState run)
     {
         var h = run.Party.Select(p => p.Id).ToList();
         string Q(int slot, string region) => Quip(h.ElementAtOrDefault(slot) ?? "vanguard", region);
@@ -63,7 +74,7 @@ public static class Story
             case "region_drowned":
                 return new Cutscene(id, "The Drowned Halls", "Region II", 1, KeeperSprite, KeeperName, KeeperTint, 1f, "menu", new[]
                 {
-                    new DialogueLine("narrator", "Below the crypt, black water has swallowed the old cathedral cellars. Somewhere in the dark, someone is singing."),
+                    new DialogueLine("narrator", "Further down, black water has swallowed the old cathedral cellars. Somewhere in the dark, someone is singing."),
                     new DialogueLine("keeper", "The Drowned Halls. The Matriarch was a Keeper once, like me. She chose the water over the flame."),
                     new DialogueLine("h1", Q(1, "drowned")),
                     new DialogueLine("h0", "Is there anything left of her we can reach?"),
@@ -89,7 +100,7 @@ public static class Story
             case "region_frost":
                 return new Cutscene(id, "The Frozen Ossuary", "Region III", 2, KeeperSprite, KeeperName, KeeperTint, 1f, "menu", new[]
                 {
-                    new DialogueLine("narrator", "The black water freezes as you descend. Frost climbs the walls, and the bones in the alcoves are sheathed in ice."),
+                    new DialogueLine("narrator", "The air turns bitter as you descend. Frost climbs the walls, and the bones in the alcoves are sheathed in ice."),
                     new DialogueLine("keeper", "The Frozen Ossuary. Vaelith rules here: a lich who cut her soul out and hid it in a jar, so that she could never die."),
                     new DialogueLine("h0", Q(0, "frost")),
                     new DialogueLine("keeper", "While that jar stands, your blows will barely touch her. Find it. Break it."),
@@ -113,7 +124,7 @@ public static class Story
             case "region_storm":
                 return new Cutscene(id, "The Storm Spire", "Region IV", 3, KeeperSprite, KeeperName, KeeperTint, 1f, "menu", new[]
                 {
-                    new DialogueLine("narrator", "The ice gives way to a spiral stair inside a tower of black stone. Thunder shakes the walls. Lightning falls without end."),
+                    new DialogueLine("narrator", "The stair opens into a tower of black stone. Thunder shakes the walls. Lightning falls without end."),
                     new DialogueLine("keeper", "Kharos, the Storm Tyrant. He was the Hollow King's general once. He chooses one prey, and his lightning never misses it."),
                     new DialogueLine("h2", Q(2, "storm")),
                     new DialogueLine("keeper", "When he brands one of you, protect them. Shield them, guard them, heal them. Or lose them."),
@@ -137,7 +148,7 @@ public static class Story
             case "region_cinder":
                 return new Cutscene(id, "The Cinder Throne", "Region V", 4, KeeperSprite, KeeperName, KeeperTint, 1f, "menu", new[]
                 {
-                    new DialogueLine("narrator", "Past the storm, the stairs glow red. Below them, everything is burning."),
+                    new DialogueLine("narrator", "At last the stairs glow red. Below them, everything is burning."),
                     new DialogueLine("keeper", "The Cinder Throne, at last. He is feeding on the Ember's heart; that is why these halls burn."),
                     new DialogueLine("h2", Q(2, "cinder")),
                     new DialogueLine("h0", "When we reach him, what happens to you?"),
@@ -154,11 +165,59 @@ public static class Story
                 return new Cutscene(id, "The Hollow King", "Devourer of the Ember", 4, "hollow_king", "The Hollow King", "#ffffff", 1.25f, "boss", new[]
                 {
                     new DialogueLine("narrator", "On a throne of cinders sits a crowned skeleton, and in its ribs, the stolen heart of the Last Ember beats."),
-                    new DialogueLine("boss", "Ilsa's little moths. You crossed my crypt, my waters, my ice and my storm, only to bring me more fuel."),
+                    new DialogueLine("boss", $"Ilsa's little moths. You crossed {Crossed(run)}, only to bring me more fuel."),
                     new DialogueLine("h1", B(1, "cinder")),
                     new DialogueLine("boss", "Fuel speaks so bravely before it burns."),
                     new DialogueLine("h0", B(0, "cinder")),
                     new DialogueLine("boss", "Then come. Kneel, or be devoured."),
+                });
+
+            case "region_garden":
+                return new Cutscene(id, "The Rotting Garden", "Region II", 5, KeeperSprite, KeeperName, KeeperTint, 1f, "menu", new[]
+                {
+                    new DialogueLine("narrator", "The stair ends in a vast glasshouse. The monks grew herbs here for the Ember's rites. Now the plants grow on their own, and they are hungry."),
+                    new DialogueLine("keeper", "The Rotting Garden. When the flame dimmed, something at its heart kept blooming. It feeds on everything that falls."),
+                    new DialogueLine("h0", Q(0, "garden")),
+                    new DialogueLine("keeper", "Her seed pods are her roots. While they live, she will not wither. Cut them first."),
+                    new DialogueLine("h1", Q(1, "garden")),
+                    new DialogueLine("keeper", "The Ember still answers offerings. Feed it, and it will mend you.", new[]
+                    {
+                        new DialogueChoice($"Offer {offer} gold (heal the party 50%)", "offer_heal", offer),
+                        new DialogueChoice("Keep the gold", "none"),
+                    }),
+                });
+
+            case "boss_garden":
+                return new Cutscene(id, "The Mother Bloom", "Heart of the Rotting Garden", 5, "mother_bloom", "The Mother Bloom", "#ffffff", 1.25f, "boss", new[]
+                {
+                    new DialogueLine("narrator", "In the middle of the glasshouse, a flower the size of a chapel opens its petals. Pods pulse around it like heartbeats."),
+                    new DialogueLine("boss", "Fresh soil. Warm and walking. My children are so very hungry."),
+                    new DialogueLine("h0", B(0, "garden")),
+                    new DialogueLine("boss", "Everything rots, little sparks. Everything feeds the garden in the end."),
+                });
+
+            case "region_archive":
+                return new Cutscene(id, "The Silent Archive", "Region IV", 6, KeeperSprite, KeeperName, KeeperTint, 1f, "menu", new[]
+                {
+                    new DialogueLine("narrator", "Shelves rise into the dark further than any torch can reach. Books drift between them like fish. Nothing makes a sound."),
+                    new DialogueLine("keeper", "The Silent Archive. Every forbidden word the Keepers wrote down is kept here, and the Archivist has read them all."),
+                    new DialogueLine("h2", Q(2, "archive")),
+                    new DialogueLine("keeper", "It learns. Whatever you strike it with, it will remember and resist. Never hit it the same way twice."),
+                    new DialogueLine("h1", Q(1, "archive")),
+                    new DialogueLine("keeper", "The flame burns low. One more offering?", new[]
+                    {
+                        new DialogueChoice($"Offer {offer} gold (heal the party 50%)", "offer_heal", offer),
+                        new DialogueChoice("Keep the gold", "none"),
+                    }),
+                });
+
+            case "boss_archive":
+                return new Cutscene(id, "The Archivist", "Keeper of Forbidden Words", 6, "archivist", "The Archivist", "#ffffff", 1.25f, "boss", new[]
+                {
+                    new DialogueLine("narrator", "A tall figure in grey robes turns a page. It has no face, only an open book where a face should be."),
+                    new DialogueLine("boss", "Shh. You are very loud for people who are about to become footnotes."),
+                    new DialogueLine("h0", B(0, "archive")),
+                    new DialogueLine("boss", "Show me your spells, then. I will read every one, and none of them will work twice."),
                 });
 
             case "ending":
@@ -187,6 +246,17 @@ public static class Story
             default:
                 return null;
         }
+    }
+
+    /// <summary>"my crypt, my waters, my ice and my storm": the regions this run actually crossed.</summary>
+    private static string Crossed(RunState run)
+    {
+        var words = Enumerable.Range(0, DungeonMap.RegionCount - 1).Select(act => run.RegionAt(act).Key switch
+        {
+            "crypt" => "my crypt", "drowned" => "my waters", "frost" => "my ice", "storm" => "my storm",
+            "garden" => "my garden", "archive" => "my library", _ => "my halls",
+        }).ToList();
+        return string.Join(", ", words.Take(words.Count - 1)) + " and " + words[^1];
     }
 
     // ═════════════════════ Hero personalities ═════════════════════
@@ -228,6 +298,34 @@ public static class Story
         ("berserker", "storm") => "Thunder means the gods are watching. Let's give them a show.",
         ("hexer", "frost") => "A lich who hid her soul. Clever. I'll find it anyway.",
         ("hexer", "storm") => "Storms are only angry curses. I know angry curses.",
+        ("vanguard", "garden") => "Plants. Hungry plants. Fine. A shield works on those too.",
+        ("vanguard", "archive") => "A library. Keep your voices down and your guard up.",
+        ("arcanist", "garden") => "Ah, a fire hazard the size of a cathedral. How convenient.",
+        ("arcanist", "archive") => "The Silent Archive! I have wanted to see it for fifty years. Don't touch anything. Except the monsters.",
+        ("warden", "garden") => "Even here something is still growing. That's almost hopeful.",
+        ("warden", "archive") => "So many stories, all locked away. Let's not become one of them.",
+        ("shadowblade", "garden") => "Thorns everywhere. My cloak is going to be shredded.",
+        ("shadowblade", "archive") => "Quiet halls. My kind of place.",
+        ("ranger", "garden") => "I know half of these plants! The other half are trying to eat us.",
+        ("ranger", "archive") => "A flying book just looked at me. Books shouldn't look at you!",
+        ("berserker", "garden") => "I'll prune this whole garden with my axe.",
+        ("berserker", "archive") => "I never learned to read. Good thing I can still hit.",
+        ("hexer", "garden") => "Rot and bloom. My kind of poetry.",
+        ("hexer", "archive") => "Somewhere in here is a curse even I don't know. I want it.",
+        ("alchemist", "crypt") => "Bone dust, grave moss, crypt fungus. I came for the dead, and I'm leaving with reagents.",
+        ("alchemist", "drowned") => "Brackish water, blessed silt. Perfect for a tincture. Terrible for breathing.",
+        ("alchemist", "frost") => "Keep the flasks close, or they'll freeze. So will we.",
+        ("alchemist", "storm") => "Lightning in a bottle. I've always wanted to try that.",
+        ("alchemist", "garden") => "Every one of these plants is a poison. I'm in heaven.",
+        ("alchemist", "archive") => "Somewhere in these shelves is the formula I lost. I'll find it.",
+        ("alchemist", "cinder") => "Fire purifies. Let's see if it purifies him.",
+        ("spellblade", "crypt") => "The Order of the Rune sent me. My blade remembers this place.",
+        ("spellblade", "drowned") => "Water conducts lightning. Remember that, everyone.",
+        ("spellblade", "frost") => "Ice on my edge, fire in my heart. Let's go.",
+        ("spellblade", "storm") => "A storm. My blade has been thirsty for one.",
+        ("spellblade", "garden") => "Flame edge, then. This will be quick.",
+        ("spellblade", "archive") => "My order's first runes were written here. I'll take them back.",
+        ("spellblade", "cinder") => "Fire, ice, storm. He'll taste all three.",
         _ => "Let's go.",
     };
 
@@ -268,6 +366,34 @@ public static class Story
         ("berserker", "storm") => "Choose me. I'm the one who hits back hardest.",
         ("hexer", "frost") => "Every soul can be found. Yours is screaming already.",
         ("hexer", "storm") => "Your lightning is loud. My curses are quiet. Quiet wins.",
+        ("vanguard", "garden") => "I'm not soil. I'm a wall. Come and see.",
+        ("vanguard", "archive") => "Footnote or not, I'm still standing in your way.",
+        ("arcanist", "garden") => "Madam, I have been waiting all my life to burn a garden this large.",
+        ("arcanist", "archive") => "Read this, then. It's called fire.",
+        ("warden", "garden") => "Not everything has to rot. Let us show you.",
+        ("warden", "archive") => "Words are meant to be shared, not hoarded.",
+        ("shadowblade", "garden") => "Big flower. Bigger knife.",
+        ("shadowblade", "archive") => "You've read everything? Then you know how this ends.",
+        ("ranger", "garden") => "I've never fought a flower before. First time for everything!",
+        ("ranger", "archive") => "Shh yourself! We're here to fight, not study!",
+        ("berserker", "garden") => "I'll pull you up by the roots.",
+        ("berserker", "archive") => "Read this axe.",
+        ("hexer", "garden") => "I'll poison the soil you grow in.",
+        ("hexer", "archive") => "You haven't read the curse I'm about to write on you.",
+        ("alchemist", "crypt") => "Such a lovely femur. I'll grind it for powder.",
+        ("alchemist", "drowned") => "Your song has a chemical cause, you know. I can cure it.",
+        ("alchemist", "frost") => "A soul in a jar? Amateur. I keep mine in a flask.",
+        ("alchemist", "storm") => "I've bottled worse than you.",
+        ("alchemist", "garden") => "I'll distill you into something useful.",
+        ("alchemist", "archive") => "You read the formulas. I brewed them. Let's see who learned more.",
+        ("alchemist", "cinder") => "Every alchemist knows: a flame stolen is a flame that burns the thief.",
+        ("spellblade", "crypt") => "Stand aside, bones. My edge is sharper than yours.",
+        ("spellblade", "drowned") => "Sink? I'd rather electrify the water.",
+        ("spellblade", "frost") => "Ice against ice? No. Fire, then.",
+        ("spellblade", "storm") => "Your lightning against my blade. Let's see whose is louder.",
+        ("spellblade", "garden") => "Wilt.",
+        ("spellblade", "archive") => "Learn fire. Learn ice. Learn storm. You can't resist them all.",
+        ("spellblade", "cinder") => "The Order sends its regards.",
         _ => "Enough talk.",
     };
 
@@ -282,6 +408,8 @@ public static class Story
         ["ranger"] = new[] { "Ooh, new ones!", "I've got eyes on them!", "Let's do this!" },
         ["berserker"] = new[] { "BLOOD AND ASH!", "Who's first?", "Finally!" },
         ["hexer"] = new[] { "Let me curse them.", "Such fragile things.", "Suffer slowly." },
+        ["alchemist"] = new[] { "Test subjects!", "Mind the fumes.", "Let's see what you're made of." },
+        ["spellblade"] = new[] { "Blade, wake up.", "Runes lit.", "En garde." },
     };
 
     private static readonly Dictionary<string, string[]> KillBarks = new()
@@ -293,6 +421,8 @@ public static class Story
         ["ranger"] = new[] { "Bullseye!", "Got one!" },
         ["berserker"] = new[] { "MORE!", "Next skull!" },
         ["hexer"] = new[] { "Withered.", "As foretold." },
+        ["alchemist"] = new[] { "Reaction complete.", "Fascinating." },
+        ["spellblade"] = new[] { "Clean cut.", "Next." },
     };
 
     private static readonly Dictionary<string, string[]> HurtBarks = new()
@@ -304,6 +434,8 @@ public static class Story
         ["ranger"] = new[] { "Ahh! Okay, ow!", "Someone help!" },
         ["berserker"] = new[] { "Now I'm angry.", "Pain is fuel!" },
         ["hexer"] = new[] { "You'll pay for that.", "My veil... is torn." },
+        ["alchemist"] = new[] { "My mask is cracked!", "Need a tonic... now." },
+        ["spellblade"] = new[] { "Just a scratch.", "My runes are fading..." },
     };
 
     private static readonly string[] BreakBarks = { "It's open, hit it!", "Broken! Now!", "It's staggered!", "Now's our chance!" };
@@ -333,6 +465,14 @@ public static class Story
         ("behemoth", false) => "*the ground rumbles*",
         ("behemoth", true) => "*its crust splits with a roar*",
         ("mimic", false) => "*hungry wooden creaking*",
+        ("mother_bloom", false) => "Feed, my children.",
+        ("mother_bloom", true) => "I will root in your bones!",
+        ("archivist", false) => "Silence in the stacks.",
+        ("archivist", true) => "Enough reading. Erasure.",
+        ("briar_witch", false) => "Grow, my little thorns.",
+        ("index_golem", false) => "*grinding brass* CATALOGUING.",
+        ("ember_wyrm", false) => "*the Wyrm uncoils, and the room turns to fire*",
+        ("ember_wyrm", true) => "*its scales split open, glowing white*",
         _ => null,
     };
 }

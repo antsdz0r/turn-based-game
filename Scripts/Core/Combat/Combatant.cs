@@ -81,12 +81,23 @@ public sealed class Combatant
     public Dictionary<string, int> MoveUses { get; } = new();
     /// <summary>Level-up traits (heroes only).</summary>
     public HashSet<string> Traits { get; } = new();
+    /// <summary>The equipped weapon's mechanic (heroes only), or null.</summary>
+    public string? WeaponEffect { get; set; }
     /// <summary>Elite modifier id (see EnemyMods), or null.</summary>
     public string? Modifier { get; set; }
+    /// <summary>Adaptive bosses: the element they currently resist (the last one that hit them).</summary>
+    public Element? AdaptedTo { get; set; }
     /// <summary>Multiplier on this enemy's attack damage (modifiers).</summary>
     public double DamageMult { get; set; } = 1.0;
     /// <summary>This round's exposed weak point (Bone Colossus), or null.</summary>
     public Element? ExposedElement { get; set; }
+    /// <summary>A second exposed weak point (the Colossus in phase 2), or null.</summary>
+    public Element? ExposedElement2 { get; set; }
+    public bool IsExposedTo(Element element) => ExposedElement == element || ExposedElement2 == element;
+    /// <summary>How many times this unit has recovered from a break (bosses get harder to break each time).</summary>
+    public int TimesBroken { get; set; }
+    /// <summary>True while it charges a big move or is about to release one (shown on its bubble).</summary>
+    public bool IsCharging => Intent is { Move.Charged: true } || ChargedMove is not null;
     public bool Summoned { get; init; }
 
     // ───── Status helpers ─────

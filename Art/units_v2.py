@@ -756,6 +756,99 @@ def tyrant():
     return s.finish(rim='d8d6e6', rim_side=1)
 
 
+# ═══════════════════════════ NEW ENEMIES (one per region) ═══════════════════════════
+
+def bellringer():
+    """Crypt: a hunched sexton who rings a funeral bell to rouse the dead."""
+    s = Spr()
+    s.part(lambda d: d.polygon([(20, 26), (36, 24), (42, 62), (14, 62)]), 'violet')                              # ragged robe
+    s.flat(lambda d: d.line([(14, 61), (42, 61)], width=2), '282033')
+    for x in (16, 22, 30, 38): s.flat(lambda d, x=x: d.polygon([(x, 62), (x + 3, 57), (x + 6, 62)]), '141019')  # tattered hem
+    s.part(lambda d: d.polygon([(18, 14), (34, 12), (38, 30), (20, 32)]), 'violet', round_=0.6)                 # hood, hunched forward
+    s.flat(lambda d: d.polygon([(26, 18), (36, 17), (37, 27), (28, 28)]), '0b0910')
+    s.dots([(31, 22), (34, 22)], 'ffb85a'); s.glow(32.5, 22, 'ffb85a', 3, 0.5)
+    s.part(lambda d: d.line([(44, 6), (40, 62)], width=3), 'wood')                                                # bell pole
+    s.part(lambda d: d.line([(44, 6), (54, 8)], width=2), 'wood')
+    s.part(lambda d: d.polygon([(48, 10), (58, 10), (61, 26), (45, 26)]), 'gold', round_=0.7)                    # the bell
+    s.flat(lambda d: d.line([(45, 26), (61, 26)], width=2), '8a6640')
+    s.part(lambda d: d.ellipse([51, 25, 55, 29]), 'iron')
+    s.part(lambda d: d.polygon([(34, 30), (42, 26), (44, 30), (36, 34)]), 'violet')                               # arm on the pole
+    s.part(lambda d: d.ellipse([39, 26, 44, 31]), 'pale')
+    return s.finish(rim='ffb85a', rim_side=1)
+
+
+def shellback():
+    """Drowned Halls: a barnacled crab the size of a cart. Armored; lightning cracks the shell."""
+    s = Spr()
+    for x in (10, 18, 40, 48):                                                                                     # legs
+        s.part(lambda d, x=x: d.line([(x + 4, 44), (x, 54), (x + 3, 62)], width=3), 'flesh')
+    s.part(lambda d: d.ellipse([6, 22, 58, 52]), ['1d3340', '2a5560', '3f8a8a', '6fd0c0'], round_=0.9)           # shell
+    for x, y in ((18, 28), (30, 25), (42, 29), (24, 38), (38, 40)):
+        s.part(lambda d, x=x, y=y: d.ellipse([x, y, x + 6, y + 5]), 'bone')                                       # barnacles
+    s.part(lambda d: d.ellipse([16, 42, 50, 52]), 'flesh', round_=0.4)                                            # underbelly
+    s.part(lambda d: (d.line([(28, 30), (26, 18)], width=2), d.line([(36, 30), (38, 18)], width=2)), 'flesh')   # eye stalks
+    s.part(lambda d: (d.ellipse([23, 14, 29, 20]), d.ellipse([35, 14, 41, 20])), 'bone')
+    s.dots([(26, 17), (38, 17)], '0b0910')
+    # One huge pincer, raised
+    s.part(lambda d: d.polygon([(48, 34), (56, 26), (60, 30), (52, 38)]), 'flesh')
+    s.part(lambda d: d.polygon([(54, 12), (63, 16), (62, 30), (52, 26)]), ['4a1e1e', '74291f', 'a63d25', 'd85f2a'], round_=0.6)
+    s.part(lambda d: d.polygon([(50, 8), (56, 6), (58, 14), (52, 18)]), ['4a1e1e', '74291f', 'a63d25', 'd85f2a'])
+    return s.finish(rim='6fd0c0', rim_side=1, rim_strength=0.45)
+
+
+def rime_sentinel():
+    """Frozen Ossuary: an ice totem with a trapped face. It shields allies and chills the party."""
+    s = Spr()
+    s.part(lambda d: d.polygon([(18, 56), (46, 56), (50, 62), (14, 62)]), 'rock')                                  # base stone
+    s.part(lambda d: d.polygon([(22, 8), (42, 8), (46, 56), (18, 56)]), ICE, round_=0.8)                          # ice pillar
+    s.part(lambda d: d.polygon([(24, 2), (32, -4), (40, 2), (42, 10), (22, 10)]), FROST)                          # crown spikes
+    s.part(lambda d: d.polygon([(16, 20), (8, 14), (12, 26), (18, 30)]), FROST)                                     # side shards
+    s.part(lambda d: d.polygon([(46, 22), (56, 16), (52, 30), (46, 32)]), FROST)
+    s.flat(lambda d: d.ellipse([25, 18, 39, 34]), '1d3340')                                                         # the trapped face
+    s.dots([(29, 24), (35, 24)], 'b8f5e4'); s.glow(32, 24, 'f4f2fa', 5, 0.6)
+    s.flat(lambda d: d.line([(29, 30), (35, 30)]), 'b8f5e4')
+    for y in (40, 46, 52): s.flat(lambda d, y=y: d.line([(22, y), (42, y - 2)]), 'b0aec8')                          # carved runes
+    return s.finish(rim='b8f5e4', rim_side=1, rim_strength=0.5)
+
+
+def ballista():
+    """Storm Spire: a brass siege ballista on wheels. It charges bolts at the back row."""
+    s = Spr()
+    s.part(lambda d: (d.ellipse([8, 46, 24, 62]), d.ellipse([38, 46, 54, 62])), 'wood', round_=0.8)                # wheels
+    s.part(lambda d: (d.ellipse([13, 51, 19, 57]), d.ellipse([43, 51, 49, 57])), 'gold')
+    s.part(lambda d: d.rectangle([10, 40, 52, 48]), 'wood', round_=0.3)                                            # carriage
+    s.part(lambda d: d.polygon([(26, 40), (36, 40), (34, 28), (28, 28)]), 'gold', round_=0.5)                       # mount
+    s.part(lambda d: d.polygon([(6, 30), (60, 22), (61, 26), (7, 34)]), 'wood')                                    # stock, aimed up-forward
+    s.part(lambda d: d.polygon([(40, 10), (46, 12), (34, 46), (30, 44)]), 'wood')                                  # bow arms
+    s.flat(lambda d: (d.line([(43, 11), (10, 31)]), d.line([(32, 45), (10, 31)])), 'd8d6e6')                       # string
+    s.part(lambda d: d.polygon([(10, 30), (62, 21), (63, 24), (11, 33)]), 'iron', round_=0.2)                      # the bolt
+    s.flat(lambda d: d.polygon([(58, 19), (64, 22), (59, 26)]), 'f4f2fa')
+    s.part(lambda d: d.ellipse([22, 20, 32, 30]), SPARK)                                                            # storm coil
+    s.glow(27, 25, 'fff6d8', 5, 0.5)
+    return s.finish(rim='d8d6e6', rim_side=1, rim_strength=0.45)
+
+
+def ash_priest():
+    """Cinder Throne: a priest of the Hollow King swinging a censer of burning ash."""
+    s = Spr()
+    s.part(lambda d: d.polygon([(21, 24), (37, 24), (44, 62), (14, 62)]), 'crimson')                               # robe
+    s.flat(lambda d: d.line([(14, 61), (44, 61)], width=2), 'ffb85a')
+    s.part(lambda d: d.polygon([(26, 26), (32, 26), (34, 60), (24, 60)]), 'gold', round_=0.3)                       # stole
+    s.flat(lambda d: (d.line([(29, 34), (29, 42)]), d.line([(26, 37), (32, 37)])), 'a63d25')
+    s.part(lambda d: d.polygon([(21, 6), (37, 6), (40, 26), (18, 26)]), 'crimson', round_=0.6)                     # tall hood
+    s.part(lambda d: d.polygon([(26, 0), (32, -2), (34, 8), (24, 8)]), 'crimson')
+    s.part(lambda d: d.polygon([(26, 12), (37, 12), (37, 24), (27, 24)]), 'bone')                                   # bone mask
+    s.dots([(30, 17), (34, 17)], '0b0910')
+    s.flat(lambda d: d.line([(29, 21), (35, 21)]), '554a6d')
+    s.part(lambda d: d.polygon([(34, 28), (43, 32), (41, 36), (33, 33)]), 'crimson')                                 # arm
+    s.part(lambda d: d.line([(42, 34), (48, 46)], width=1), 'iron')                                                 # censer chain
+    s.part(lambda d: d.ellipse([44, 44, 54, 54]), 'gold', round_=0.8)                                               # censer
+    s.part(lambda d: d.ellipse([46, 40, 52, 46]), 'fire', round_=0.9)
+    s.glow(49, 44, 'ffe09a', 6, 0.6)
+    for x, y in ((50, 36), (47, 32), (52, 28)): s.dot(x, y, '8a86a6')                                                # smoke
+    return s.finish(rim='ffb85a', rim_side=1)
+
+
 HEROES = {'vanguard': vanguard, 'arcanist': arcanist, 'warden': warden, 'shadowblade': shadowblade,
           'ranger': ranger, 'cleric': keeper, 'berserker': berserker, 'hexer': hexer}
 ENEMIES = {'skeleton': skeleton, 'skeleton_archer': skeleton_archer, 'ghoul': ghoul, 'cultist': cultist,
@@ -763,4 +856,6 @@ ENEMIES = {'skeleton': skeleton, 'skeleton_archer': skeleton_archer, 'ghoul': gh
            'hollow_king': hollow_king, 'rat': rat, 'moth': moth, 'thrall': thrall, 'siren': siren,
            'leech': leech, 'imp': imp, 'golem': golem, 'colossus': colossus, 'matriarch': matriarch,
            'mimic': mimic, 'wight': wight, 'wisp': wisp, 'hound': hound, 'phylactery': phylactery, 'lich': lich,
-           'harpy': harpy, 'construct': construct, 'stormcaller': stormcaller, 'tyrant': tyrant}
+           'harpy': harpy, 'construct': construct, 'stormcaller': stormcaller, 'tyrant': tyrant,
+           'bellringer': bellringer, 'shellback': shellback, 'rime_sentinel': rime_sentinel, 'ballista': ballista,
+           'ash_priest': ash_priest}

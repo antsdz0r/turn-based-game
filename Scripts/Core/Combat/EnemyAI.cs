@@ -148,11 +148,39 @@ public static class EnemyAI
             case "arc_golem":
                 return battle.Round % 3 == 2 && !Last("overload") ? Pick("overload") : Pick("arc_slam");
 
+            case "bellringer":
+                // The toll comes on a fixed rhythm (rounds 1, 4, 7...), so the player can plan to silence it.
+                if (battle.Round % 3 == 1 && !Last("toll")) return Pick("toll");
+                if (!Last("dread_toll") && Roll(40)) return Pick("dread_toll");
+                return Pick("bell_strike");
+
+            case "shellback":
+                if (e.HealthPct < 60 && !Last("shell_up") && !e.Has(StatusKind.Shield) && Roll(50)) return Pick("shell_up");
+                if (battle.Round % 3 == 2 && !Last("crush")) return Pick("crush");
+                return Pick("pinch");
+
+            case "rime_sentinel":
+                if (allies.Any(a => a != e && a.HealthPct < 80 && !a.Has(StatusKind.Shield)) && !Last("rime_ward")) return Pick("rime_ward");
+                return Pick("chill");
+
+            case "ballista":
+                if (battle.Round % 3 == 1 && !Last("ballista_bolt")) return Pick("ballista_bolt");
+                if (!Last("reload") && Roll(25)) return Pick("reload");
+                return Pick("rattle_shot");
+
+            case "ash_priest":
+                if (allies.Any(a => a.HealthPct < 60) && !Last("ash_mend")) return Pick("ash_mend");
+                if (!Last("censer") && Roll(40)) return Pick("censer");
+                return Pick("sear");
+
             case "tyrant":
             {
                 // Brand a hero, then charge the Thunderstrike at the branded hero the next round.
                 bool p1 = e.Phase == 1;
-                string brand = p1 ? "storm_brand" : "storm_brand2", strike = p1 ? "thunderstrike" : "thunderstrike2";
+                // Phase 2: the brand forks over the back row when two heroes stand there.
+                bool fork = !p1 && heroes.Count(h => h.Row == Row.Back) >= 2;
+                string brand = p1 ? "storm_brand" : fork ? "forked_brand" : "storm_brand2", strike = p1 ? "thunderstrike" : "thunderstrike2";
+                if (!p1 && (Last("forked_brand") || Last("storm_brand2")) && heroes.Any(h => h.Has(StatusKind.Marked))) return Pick(strike);
                 bool someoneBranded = heroes.Any(h => h.Has(StatusKind.Marked));
                 if (Last(brand) && someoneBranded) return Pick(strike);
                 if (!p1 && allies.Count < 2 && !Last("call_harpies") && Uses("call_harpies") < 3) return Pick("call_harpies");
@@ -225,10 +253,97 @@ public static class EnemyAI
                     return Pick("riptide");
                 }
                 if (e.HealthPct < 30 && !Last("tide_mend") && Roll(50)) return Pick("tide_mend");
-                if (battle.Round % 3 == 2 && !Last("flood2")) return Pick("flood2");
+                // Phase 2: the tide alternates rows, front then back, so the party has to keep repositioning.
+                if (battle.Round % 3 == 2 && !Last("flood2") && !Last("undertow"))
+                    return Uses("flood2") <= Uses("undertow") ? Pick("flood2") : Pick("undertow");
                 if (battle.Round % 3 == 0 && !Last("drown2")) return Pick("drown2");
                 if (!Last("abyss_wail") && Roll(40)) return Pick("abyss_wail");
                 return Pick("depths");
+
+            // ── The Rotting Garden ──
+            case "thornling":
+                return !Last("bristle") && e.HealthPct < 70 && Roll(35) ? Pick("bristle") : Pick("thorn_lash");
+
+            case "spore_puffer":
+                return heroes.Count(h => h.Has(StatusKind.Poison)) < 2 && !Last("spore_cloud") ? Pick("spore_cloud") : Pick("puff");
+
+            case "strangler":
+                if (battle.Round % 3 == 2 && !Last("crushing_coil")) return Pick("crushing_coil");
+                return Pick("root_grasp");
+
+            case "stalker":
+                return !e.Has(StatusKind.Empowered) && !Last("stalk") && Roll(30) ? Pick("stalk") : Pick("pounce");
+
+            case "briar_witch":
+                if (allies.Count < 3 && !Last("grow") && Uses("grow") < 2) return Pick("grow");
+                if (allies.Any(a => a != e && a.HealthPct < 60 && !a.Has(StatusKind.Shield)) && !Last("bark_ward")) return Pick("bark_ward");
+                if (!Last("bramble_curse") && Roll(40)) return Pick("bramble_curse");
+                return Pick("wither");
+
+            case "seed_pod":
+                return Pick("sap_flow");
+
+            case "mother_bloom":
+                if (e.Phase == 1)
+                {
+                    if (allies.Count(a => a.DefId == "seed_pod") < 2 && !Last("sow") && Uses("sow") < 4) return Pick("sow");
+                    if (battle.Round % 3 == 2 && !Last("bloom_burst")) return Pick("bloom_burst");
+                    if (!Last("petal_storm") && Roll(40)) return Pick("petal_storm");
+                    return Pick("vine_whip");
+                }
+                if (e.HealthPct < 35 && allies.Any(a => a.DefId == "seed_pod") && !Last("devour_pod") && Uses("devour_pod") < 2) return Pick("devour_pod");
+                if (allies.Count(a => a.DefId == "seed_pod") < 1 && !Last("sow2") && Uses("sow2") < 3) return Pick("sow2");
+                if (battle.Round % 3 == 0 && !Last("bloom_burst2")) return Pick("bloom_burst2");
+                return Pick("strangling_roots");
+
+            case "ember_wyrm":
+                if (e.Phase == 1)
+                {
+                    if (battle.Round % 3 == 0 && !Last("flame_breath")) return Pick("flame_breath");
+                    if (!Last("wing_gust") && Roll(20)) return Pick("wing_gust");
+                    if (!Last("tail_sweep") && Roll(35)) return Pick("tail_sweep");
+                    return Pick("wyrm_claw");
+                }
+                if (battle.Round % 3 == 1 && !Last("inferno")) return Pick("inferno");
+                if (!e.Has(StatusKind.Empowered) && !Last("molten_roar") && Roll(30)) return Pick("molten_roar");
+                if (!Last("tail_sweep2") && Roll(40)) return Pick("tail_sweep2");
+                return Pick("wyrm_claw2");
+
+            // ── The Silent Archive ──
+            case "tome":
+                return allies.Count > 1 && !allies.Any(a => a.Has(StatusKind.Empowered)) && !Last("read_aloud") && Roll(30)
+                    ? Pick("read_aloud") : Pick("page_cut");
+
+            case "ink_wraith":
+                return !Last("drown_ink") && Roll(35) ? Pick("drown_ink") : Pick("ink_blot");
+
+            case "gargoyle":
+                if (battle.Round % 3 == 0 && !Last("dive")) return Pick("dive");
+                if (e.HealthPct < 50 && !e.Has(StatusKind.Shield) && !Last("petrify")) return Pick("petrify");
+                return Pick("stone_claw");
+
+            case "quill_swarm":
+                return Pick("quill_stab");
+
+            case "index_golem":
+                // Catalogue a hero, then Reshelve them next round (the charge gives the party one round to react).
+                if (heroes.Any(h => h.Has(StatusKind.Marked)) && !Last("reshelve") && Last("catalogue")) return Pick("reshelve");
+                if (!Last("catalogue") && battle.Round % 3 == 1) return Pick("catalogue");
+                if (e.HealthPct < 40 && !e.Has(StatusKind.Shield) && !Last("bind_pages")) return Pick("bind_pages");
+                return Pick("brass_fist");
+
+            case "archivist":
+                if (e.Phase == 1)
+                {
+                    if (allies.Count < 2 && !Last("summon_tomes") && Uses("summon_tomes") < 3) return Pick("summon_tomes");
+                    if (battle.Round % 3 == 2 && !Last("forbidden_word")) return Pick("forbidden_word");
+                    if (!Last("redact") && Roll(30)) return Pick("redact");
+                    return Pick("index_bolt");
+                }
+                if (battle.Round % 3 == 1 && !Last("erase")) return Pick("erase");
+                if (allies.Count < 2 && !Last("summon_tomes2") && Uses("summon_tomes2") < 2) return Pick("summon_tomes2");
+                if (!Last("page_storm") && Roll(40)) return Pick("page_storm");
+                return Pick("index_bolt2");
 
             default:
                 return e.Moves[rng.Next(e.Moves.Count)];

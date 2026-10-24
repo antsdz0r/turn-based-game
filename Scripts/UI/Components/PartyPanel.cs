@@ -112,7 +112,7 @@ public partial class PartyPanel : Control
         foreach (var id in run.Relics.Where(Database.HasRelicDef))
         {
             var relic = Database.Relic(id);
-            var icon = Visuals.Icon("UI/icon_relic.png", 28, $"{relic.Name}\n{relic.Description}");
+            var icon = Visuals.Icon("UI/icon_relic.png", 28, $"{relic.Name}\n{relic.Description}{(relic.Curse is { } curse ? $"\nCurse: {curse}" : "")}");
             icon.Modulate = new Color(relic.ColorHex);
             relics.AddChild(icon);
         }
@@ -166,7 +166,7 @@ public partial class PartyPanel : Control
 
         column.AddChild(Visuals.Separator());
         column.AddChild(Visuals.Label("Abilities", 18, Visuals.Gold, serif: true));
-        foreach (var id in def.Abilities.Prepend(def.BasicAbility))
+        foreach (var id in hero.AbilityIds.Prepend(def.BasicAbility))
         {
             var ability = Database.Ability(id);
             bool up = hero.Upgrades.Contains(id);
@@ -229,7 +229,8 @@ public partial class PartyPanel : Control
             var row = new HBoxContainer();
             row.AddThemeConstantOverride("separation", 6);
             row.AddChild(Visuals.Icon(Visuals.ItemIcon(item), 24));
-            var label = Visuals.Rich($"[b]{item.Name}[/b] [color=#a99f8f]({item.Kind})[/color]\n[color=#a99f8f]{item.Description}[/color]", 13);
+            string kind = item.IsEquipment ? $"[color={Visuals.RarityHex(item)}]{item.Rarity}[/color] {item.Family ?? item.Kind.ToString()}" : item.Kind.ToString();
+            var label = Visuals.Rich($"[b]{item.Name}[/b] [color=#a99f8f]({kind})[/color]\n[color=#a99f8f]{item.Description}[/color]", 13);
             label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
             row.AddChild(label);
             row.AddChild(Visuals.Button("Equip", () =>

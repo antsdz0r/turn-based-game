@@ -5,4 +5,8 @@
     <RootNamespace>TBRPG</RootNamespace>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- The xUnit project in Tests/ builds separately (dotnet test Tests). -->
+    <Compile Remove="Tests/**" />
+  </ItemGroup>
 </Project>

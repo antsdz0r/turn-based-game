@@ -35,7 +35,7 @@ public partial class UpgradePicker : Control
         var title = Visuals.Title("Upgrade an Ability", 28);
         title.HorizontalAlignment = HorizontalAlignment.Center;
         root.AddChild(title);
-        var note = Visuals.Label("Upgraded: +35% damage/healing/shield, +1 status potency and duration, -1 cooldown.", 13, Visuals.TextDim);
+        var note = Visuals.Label("Upgraded: +35% damage/healing/shield, +1 status potency and duration, -1 cooldown. Many abilities also gain a twist (shown below).", 13, Visuals.TextDim);
         note.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         note.CustomMinimumSize = new Vector2(860, 0);
         note.HorizontalAlignment = HorizontalAlignment.Center;
@@ -75,7 +75,7 @@ public partial class UpgradePicker : Control
         var run = GameSession.Run;
         if (run is null) return;
         var hero = run.Hero(_heroId);
-        foreach (var id in hero.Def.Abilities.Prepend(hero.Def.BasicAbility))
+        foreach (var id in hero.AbilityIds.Prepend(hero.Def.BasicAbility))
         {
             var ability = Database.Ability(id);
             bool done = hero.Upgrades.Contains(id);

@@ -7,7 +7,27 @@ namespace TBRPG.Core;
 public static partial class Database
 {
     private static readonly Dictionary<string, ItemDef> ItemTable = BuildItems().ToDictionary(i => i.Id);
-    private static readonly Dictionary<string, RelicDef> RelicTable = BuildRelics().ToDictionary(r => r.Id);
+    private static readonly Dictionary<string, RelicDef> RelicTable = BuildRelics().Concat(BuildPactRelics()).ToDictionary(r => r.Id);
+
+    private static IEnumerable<RelicDef> BuildPactRelics()
+    {
+        yield return new RelicDef { Id = "bloodstone_crown", Name = "Bloodstone Crown", ColorHex = "#ff4a4a", Special = true, Pact = true,
+            Description = "Heroes deal +30% damage.", Curse = "Rest sites no longer heal." };
+        yield return new RelicDef { Id = "glass_heart", Name = "Glass Heart", ColorHex = "#ff8ab0", Special = true, Pact = true,
+            Description = "Heroes have +25% crit chance.", Curse = "Heroes take 20% more damage." };
+        yield return new RelicDef { Id = "greed_idol", Name = "Idol of Greed", ColorHex = "#ffd700", Special = true, Pact = true,
+            Description = "Battles pay +60% gold.", Curse = "Shop prices are 30% higher." };
+        yield return new RelicDef { Id = "hollow_lantern", Name = "Hollow Lantern", ColorHex = "#c070ff", Special = true, Pact = true,
+            Description = "Abilities cost 1 less.", Curse = "Heroes start every battle with at most 80% of their max HP." };
+        yield return new RelicDef { Id = "doom_clock", Name = "Doom Clock", ColorHex = "#d8d6e6", Special = true, Pact = true,
+            Description = "Heroes deal +40% damage.", Curse = "From round 7 on, every hero takes 4 damage at the start of each round." };
+        yield return new RelicDef { Id = "thorn_pact", Name = "Pact of Thorns", ColorHex = "#6f9a40", Special = true, Pact = true,
+            Description = "Heroes always counter melee attacks for 5 damage.", Curse = "Heroes have 2 less armor." };
+    }
+
+    public static IEnumerable<RelicDef> PactRelics => AllRelics.Where(r => r.Pact);
+    /// <summary>Description with the curse, for tooltips and reward cards.</summary>
+    public static string RelicText(RelicDef r) => r.Curse is null ? r.Description : $"{r.Description} [color=#ff6b6b]Curse: {r.Curse}[/color]";
 
     public static ItemDef Item(string id) => ItemTable[id];
     public static bool HasItem(string id) => ItemTable.ContainsKey(id);
@@ -37,6 +57,53 @@ public static partial class Database
             PowerPct = 28, Crit = 5, Description = "+28% damage, +5% crit chance." };
         yield return new ItemDef { Id = "tempest_bow", Name = "Tempest Bow", Kind = ItemKind.Weapon, Icon = "weapon", Tier = 3, Price = 120,
             BoostElement = Element.Lightning, BoostPct = 40, Speed = 1, Description = "+40% lightning damage, +1 speed." };
+
+        // ── Weapon families: each has a mechanic AND a drawback ──
+        yield return new ItemDef { Id = "embercleaver", Name = "Embercleaver", Family = "Greatblade", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 1, Price = 70, Speed = -1, WeaponEffect = "guardbreaker",
+            Description = "Greatblade. Hits on a Shielded or Defending enemy chip 2 extra break pips. Drawback: -1 speed." };
+        yield return new ItemDef { Id = "oathbreaker", Name = "Oathbreaker", Family = "Greatblade", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 2, Price = 95, Speed = -2, PowerPct = 10, WeaponEffect = "execution",
+            Description = "Greatblade. +10% damage, and +50% more against BROKEN enemies. Drawback: -2 speed." };
+        yield return new ItemDef { Id = "ashwood_longbow", Name = "Ashwood Longbow", Family = "Bow", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 1, Price = 70, WeaponEffect = "hunter",
+            Description = "Bow. The first hit each battle Marks the target. +30% damage against Marked enemies. Drawback: -10% against unmarked ones." };
+        yield return new ItemDef { Id = "windpiercer", Name = "Windpiercer", Family = "Bow", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 2, Price = 90, WeaponEffect = "piercing",
+            Description = "Bow. Attacks never miss and ignore armor. Drawback: -15% damage." };
+        yield return new ItemDef { Id = "gutterfangs", Name = "Gutterfangs", Family = "Daggers", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 1, Price = 65, WeaponEffect = "twin",
+            Description = "Twin daggers. The basic attack strikes twice at 60% power (two chances to crit and chip break). Drawback: armor blocks each hit." };
+        yield return new ItemDef { Id = "last_whisper", Name = "Last Whisper", Family = "Daggers", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 2, Price = 85, WeaponEffect = "blood_price",
+            Description = "Ritual dagger. Abilities cost 1 less resource; every kill restores 1. Drawback: using an ability costs 2 HP." };
+        yield return new ItemDef { Id = "wardens_pike", Name = "Warden's Pike", Family = "Spear", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 1, Price = 70, PowerPct = -10, WeaponEffect = "reach",
+            Description = "Spear. Melee attacks reach the back row. +30% damage and +1 break pip against CHARGING enemies. Drawback: -10% damage." };
+        yield return new ItemDef { Id = "oathkeeper", Name = "Oathkeeper", Family = "Shield", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 2, Price = 85, PowerPct = -15, Armor = 1, WeaponEffect = "oathkeeper",
+            Description = "Sword and shield. Defending or protecting an ally readies a Riposte (6); ripostes chip 1 break pip. +1 armor. Drawback: -15% damage." };
+        yield return new ItemDef { Id = "gravemason", Name = "Gravemason", Family = "Hammer", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 2, Price = 90, Speed = -2, PowerPct = 5, WeaponEffect = "crush",
+            Description = "Hammer. Hits smash an enemy's Shield before dealing damage and sunder 1 armor for the rest of the battle. +5% damage. Drawback: -2 speed." };
+        yield return new ItemDef { Id = "cinder_tome", Name = "Cinder Tome", Family = "Tome", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 1, Price = 65, WeaponEffect = "cinder",
+            Description = "Tome. Fire hits set the target Burning (2 for 2 turns); fire hits on an already Burning enemy chip 1 break pip. Drawback: -15% non-fire damage." };
+        yield return new ItemDef { Id = "stormglass_focus", Name = "Stormglass Focus", Family = "Focus", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 2, Price = 90, WeaponEffect = "stormglass",
+            Description = "Focus. Every 3rd fire, ice or lightning hit arcs to another enemy for half damage. Drawback: -20% physical damage." };
+        yield return new ItemDef { Id = "gravewheat_scythe", Name = "Gravewheat Scythe", Family = "Scythe", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 2, Price = 90, Armor = -1, WeaponEffect = "reap",
+            Description = "Scythe. The basic attack sweeps on to a second enemy for half damage. Drawback: -1 armor." };
+        yield return new ItemDef { Id = "penitents_flail", Name = "Penitent's Flail", Family = "Flail", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 1, Price = 70, Crit = 8, WeaponEffect = "flail",
+            Description = "Flail. +8% crit, and critical hits chip 2 extra break pips. Drawback: -10% accuracy." };
+        yield return new ItemDef { Id = "vigil_lantern", Name = "Vigil Lantern", Family = "Lantern", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 2, Price = 90, PowerPct = -10, WeaponEffect = "lantern",
+            Description = "Lantern. Damage from abilities mends the most wounded ally for 20% of it. Drawback: -10% damage." };
+        yield return new ItemDef { Id = "rimefang_rapier", Name = "Rimefang Rapier", Family = "Rapier", Kind = ItemKind.Weapon, Icon = "weapon",
+            Tier = 2, Price = 95, Crit = 25, MaxHp = -6, WeaponEffect = "rime_crit",
+            Description = "Rapier. +25% crit, and critical hits Slow the target. Drawback: -6 max HP." };
 
         // Armor
         yield return new ItemDef { Id = "padded_coat", Name = "Padded Coat", Kind = ItemKind.Armor, Icon = "armor", Tier = 1, Price = 35,
@@ -77,6 +144,14 @@ public static partial class Database
             DamageAll = 7, DamageElement = Element.Ice, Description = "7 ice damage to every enemy." };
         yield return new ItemDef { Id = "phoenix_feather", Name = "Phoenix Feather", Kind = ItemKind.Consumable, Icon = "feather", Price = 60,
             ReviveHpPct = 40, Description = "Revive a fallen ally with 40% HP." };
+        yield return new ItemDef { Id = "shock_dart", Name = "Shock Dart", Kind = ItemKind.Consumable, Icon = "bomb", Price = 40,
+            Interrupts = true, DamageElement = Element.Lightning,
+            Description = "Throw at an enemy: 4 lightning damage and INTERRUPTS its charged attack. Bosses can't be interrupted; they lose 2 break pips instead." };
+        yield return new ItemDef { Id = "ward_flask", Name = "Warding Flask", Kind = ItemKind.Consumable, Icon = "flask", Price = 35,
+            ShieldAll = 10, Description = "Every hero gains a 10 Shield. Throw it before a big charged attack lands." };
+        yield return new ItemDef { Id = "thunder_flask", Name = "Thunder Flask", Kind = ItemKind.Consumable, Icon = "bomb", Price = 40,
+            DamageAll = 5, DamageElement = Element.Lightning, BreakAll = 1,
+            Description = "5 lightning damage to every enemy and chips 1 break pip from each, weakness or not." };
     }
 
     private static IEnumerable<RelicDef> BuildRelics()
@@ -124,21 +199,68 @@ public static partial class Database
             Description = "Poison applied by heroes is 2 stronger." };
         yield return new RelicDef { Id = "scholars_lamp", Name = "Scholar's Lamp", ColorHex = "#fff2a8",
             Description = "+40% experience from battles." };
+        // ── Combo relics: they reward setting something up first ──
+        yield return new RelicDef { Id = "static_sigil", Name = "Static Sigil", ColorHex = "#c9a0ff",
+            Description = "The first lightning hit on each enemy every battle chips 1 break pip, even without a weakness." };
+        yield return new RelicDef { Id = "shatterglass", Name = "Shatterglass Charm", ColorHex = "#bfeaff",
+            Description = "Physical hits on a Slowed enemy chip 1 break pip. Chill it, then shatter it." };
+        yield return new RelicDef { Id = "sentinels_oath", Name = "Sentinel's Oath", ColorHex = "#8fb3ff",
+            Description = "Whenever a hero Defends, the most wounded other hero gains a 6 Shield." };
+        yield return new RelicDef { Id = "hunters_tally", Name = "Hunter's Tally", ColorHex = "#7fd4a0",
+            Description = "Killing a Marked enemy restores 2 resource and 4 HP to the killer." };
     }
+
+    /// <summary>Items still locked behind feats (set from the profile at startup; empty in tests). Never offered in runs.</summary>
+    public static HashSet<string> LockedItems { get; set; } = new();
+    /// <summary>Items that can show up in rewards, shops and events.</summary>
+    public static IEnumerable<ItemDef> OfferedItems => AllItems.Where(i => !LockedItems.Contains(i.Id));
 
     public static ItemDef RandomEquipment(Random rng, int maxTier)
     {
-        var pool = AllItems.Where(i => i.IsEquipment && i.Tier <= maxTier).ToList();
+        var pool = OfferedItems.Where(i => i.IsEquipment && i.Tier <= maxTier).ToList();
         return pool[rng.Next(pool.Count)];
     }
 
     public static ItemDef RandomConsumable(Random rng)
     {
-        var pool = AllItems.Where(i => !i.IsEquipment).ToList();
+        var pool = OfferedItems.Where(i => !i.IsEquipment).ToList();
         return pool[rng.Next(pool.Count)];
     }
 
     /// <summary>A relic the party doesn't own yet, or null if they own them all.</summary>
+    /// <summary>Every weapon mechanic the battle rules implement (checked by Database.Validate).</summary>
+    public static readonly HashSet<string> WeaponEffects = new()
+        { "guardbreaker", "execution", "hunter", "piercing", "twin", "blood_price", "reach", "oathkeeper", "stormglass", "crush", "cinder",
+          "reap", "flail", "lantern", "rime_crit" };
+
+    /// <summary>Short in-battle description of each weapon mechanic (hero tooltip).</summary>
+    public static string WeaponEffectText(string? effect) => effect switch
+    {
+        "guardbreaker" => "Embercleaver: +2 break pips against Shielded or Defending enemies.",
+        "execution" => "Oathbreaker: +50% damage against BROKEN enemies.",
+        "hunter" => "Ashwood Longbow: first hit Marks; +30% vs Marked, -10% otherwise.",
+        "piercing" => "Windpiercer: never misses, ignores armor, -15% damage.",
+        "twin" => "Gutterfangs: basic attack strikes twice at 60%.",
+        "blood_price" => "Last Whisper: abilities cost 1 less and 2 HP; kills restore 1.",
+        "reach" => "Warden's Pike: melee reaches the back row; +30% and +1 break vs charging enemies.",
+        "oathkeeper" => "Oathkeeper: Defend / Protect readies a Riposte that chips break.",
+        "stormglass" => "Stormglass Focus: every 3rd elemental hit arcs to another enemy.",
+        "crush" => "Gravemason: hits smash Shields and sunder 1 armor for the battle.",
+        "cinder" => "Cinder Tome: fire hits Burn; fire on a Burning enemy chips 1 break pip.",
+        "reap" => "Gravewheat Scythe: the basic attack also hits a second enemy for half.",
+        "flail" => "Penitent's Flail: crits chip 2 break pips; -10% accuracy.",
+        "lantern" => "Vigil Lantern: ability damage heals the most wounded ally 20%.",
+        "rime_crit" => "Rimefang Rapier: +25% crit; crits Slow.",
+        _ => "",
+    };
+
+    /// <summary>A signature weapon for boss rewards (a weapon family, Rare or better if possible).</summary>
+    public static ItemDef? RandomFamilyWeapon(Random rng, int maxTier)
+    {
+        var pool = OfferedItems.Where(i => i.WeaponEffect is not null && i.Tier <= Math.Max(2, maxTier)).ToList();
+        return pool.Count == 0 ? null : pool[rng.Next(pool.Count)];
+    }
+
     public static RelicDef? RandomRelic(Random rng, ICollection<string> owned)
     {
         var pool = AllRelics.Where(r => !r.Special && !owned.Contains(r.Id)).ToList();

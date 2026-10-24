@@ -16,6 +16,7 @@ public static class EnemyMods
         new("splitting", "Splitting", "Splitting: when killed, it splits into two smaller copies.", "#b3d05a"),
         new("vampiric", "Vampiric", "Vampiric: heals for 40% of the damage it deals.", "#a8406a"),
         new("thorned", "Thorned", "Thorned: melee attackers take 3 damage.", "#6f9a40"),
+        new("volatile", "Volatile", "Volatile: explodes when killed, dealing 6 damage to every hero in the front row. Pull back before the killing blow, or shield up.", "#ff8a2c"),
     };
 
     public static EnemyModDef? Get(string? id) => id is null ? null : All.FirstOrDefault(m => m.Id == id);
@@ -33,16 +34,19 @@ public static class EnemyMods
             case "splitting": break;
             case "vampiric": unit.MaxHp = unit.Hp = (int)Math.Round(unit.MaxHp * 1.1); break;
             case "thorned": break;
+            case "volatile": break;
         }
     }
 
     /// <summary>Elites always get one; from the second region on, ordinary enemies sometimes do too.</summary>
-    public static void Roll(List<Combatant> enemies, int region, Random rng)
+    /// <summary>Heat 1+: ordinary enemies carry modifiers twice as often, from the first region on.</summary>
+    public static void Roll(List<Combatant> enemies, int region, Random rng, int heat = 0)
     {
         foreach (var e in enemies)
         {
             if (e.IsBoss) continue;
-            bool roll = e.IsElite || (region >= 1 && rng.Next(100) < 8 + 6 * region);
+            int chance = heat >= 1 ? 2 * (8 + 6 * region) : region >= 1 ? 8 + 6 * region : 0;
+            bool roll = e.IsElite || rng.Next(100) < chance;
             if (!roll) continue;
             var pool = All.Where(m => !(m.Id == "splitting" && e.IsElite && e.MaxHp > 70)).ToList();
             Apply(e, pool[rng.Next(pool.Count)].Id);

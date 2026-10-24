@@ -10,7 +10,7 @@ public static class Heat
 
     public static readonly IReadOnlyList<string> Modifiers = new List<string>
     {
-        "Enemies have +15% HP.",
+        "Enemies carry modifiers (Frenzied, Thorned, Splitting...) twice as often, from the first region on.",
         "Enemies deal +10% damage. Elites and the boss gain +1 break pip.",
         "Start with 30 less gold. Shop prices +20%.",
         "Rest sites heal 25% instead of 35%.",

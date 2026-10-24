@@ -29,6 +29,7 @@ public static class GameSession
     public const string CompendiumScene = "res://Scenes/Compendium.tscn";
     public const string CutsceneScene = "res://Scenes/Cutscene.tscn";
     public const string ShrineScene = "res://Scenes/EmberShrine.tscn";
+    public const string MasteryScene = "res://Scenes/Mastery.tscn";
 
     public enum AfterCutscene { Map, Node, End }
 
@@ -59,6 +60,9 @@ public static class GameSession
         if (Godot.FileAccess.FileExists(SettingsPath))
             Settings = Settings.FromJson(Godot.FileAccess.GetFileAsString(SettingsPath));
         ApplyDisplaySettings();
+        RefreshUnlocks();
+        // Catch broken content (bad enemy ids, missing summons...) at startup instead of mid-run.
+        foreach (var problem in Database.Validate()) GD.PushError($"[Content] {problem}");
     }
 
     // ═════════════════════════ Runs ═════════════════════════
@@ -74,6 +78,9 @@ public static class GameSession
         Run = RunState.NewRun(heroes, Math.Abs(seed), Math.Clamp(heat, 0, Profile.MaxHeatUnlocked));
         Meta.ApplyStartBonuses(Run, Profile);
         Profile.RunsStarted++;
+        Profile.LoreNew.Clear();
+        Profile.NewHeroes.Clear();
+        Lore.Refresh(Profile);
         SaveProfile();
         SaveRun();
         ChangeScene(tree, MapScene);
@@ -84,7 +91,35 @@ public static class GameSession
     {
         Run = Daily.Create(Daily.Today);
         Profile.RunsStarted++;
+        Profile.LoreNew.Clear();
+        Profile.NewHeroes.Clear();
+        Lore.Refresh(Profile);
         SaveProfile();
+        SaveRun();
+        ChangeScene(tree, MapScene);
+    }
+
+    /// <summary>This week's challenge: fixed seed, party and three mutators.</summary>
+    public static void StartWeekly(SceneTree tree)
+    {
+        Run = Weekly.Create(Weekly.ThisWeek);
+        Profile.RunsStarted++;
+        Profile.LoreNew.Clear();
+        Profile.NewHeroes.Clear();
+        Lore.Refresh(Profile);
+        SaveProfile();
+        SaveRun();
+        ChangeScene(tree, MapScene);
+    }
+
+    /// <summary>Endless mode: the party that just beat the Hollow King goes round the vault again, harder.</summary>
+    public static void DescendDeeper(SceneTree tree)
+    {
+        if (EndedRun is not { } run || !EndedWon || !Endless.CanDescend(run)) return;
+        Endless.Descend(run);
+        Run = run;
+        EndedRun = null;
+        EndedWon = false;
         SaveRun();
         ChangeScene(tree, MapScene);
     }
@@ -120,7 +155,7 @@ public static class GameSession
             Run.Stats.GoldEarned += 30;
         }
         SaveRun();
-        string bossScene = Story.BossIntroId(node.Region);
+        string bossScene = Story.BossIntroId(Run, node.Region);
         if (node.Type == NodeType.Boss && !Run.SeenScenes.Contains(bossScene))
         {
             PlayCutscene(tree, bossScene, AfterCutscene.Node);
@@ -131,6 +166,8 @@ public static class GameSession
 
     public static void PlayCutscene(SceneTree tree, string id, AfterCutscene next)
     {
+        // Entering a region adds its page to the lore codex.
+        if (id.StartsWith("region_") && Lore.Unlock(Profile, id) is not null) SaveProfile();
         if (Run is not null && !Run.SeenScenes.Contains(id))
         {
             Run.SeenScenes.Add(id);
@@ -179,9 +216,13 @@ public static class GameSession
     {
         if (Run is null) return;
         bool boss = Run.Node?.Type == NodeType.Boss && DungeonMap.IsFinalRegion(Run.Node.Region);
+        int loreBefore = Profile.LoreFound.Count;
         foreach (var e in battle.Enemies.Where(e => e.IsBoss)) Profile.RecordBoss(e.DefId);
         SaveProfile();
+        RefreshUnlocks();
         LastResult = Run.ApplyVictory(battle);
+        foreach (var page in Profile.LoreFound.Skip(loreBefore).Select(Lore.Get))
+            if (page is not null) LastResult.Lines.Add($"[color=#9fd8ff]New lore page: {page.Title}[/color] (Compendium → Lore)");
         Run.CompleteNode(); // rewards are applied: never replay this battle on Continue
         if (boss)
         {
@@ -197,6 +238,10 @@ public static class GameSession
         if (Run is null) return;
         Run.Stats.EnemiesSlain += battle.EnemiesSlain;
         Run.Stats.DamageDealt += battle.DamageDealt;
+        Run.Stats.Combos += battle.CombosTriggered;
+        Run.Stats.Breaks += battle.Breaks;
+        Run.Stats.AddBattle(battle);
+        Run.Stats.DefeatedBy = string.Join(", ", battle.Enemies.Where(e => !e.Summoned).Select(e => e.Name).Distinct());
         EndRun(tree, won: false);
     }
 
@@ -205,11 +250,12 @@ public static class GameSession
         if (Run is null) return;
         Profile.RecordRunEnd(Run, won);
         SaveProfile();
+        RefreshUnlocks();
         EndedRun = Run;
         EndedWon = won;
         Run = null;
         DeleteRun();
-        if (won) PlayCutscene(tree, Story.EndingId, AfterCutscene.End);
+        if (won && EndedRun?.Loop == 0) PlayCutscene(tree, Story.EndingId, AfterCutscene.End);
         else ChangeScene(tree, EndScene);
     }
 
@@ -227,6 +273,9 @@ public static class GameSession
         Engine.TimeScale = 1.0;
         tree.ChangeSceneToFile(path);
     }
+
+    /// <summary>Weapons locked behind unfinished feats stay out of rewards and shops.</summary>
+    public static void RefreshUnlocks() => Database.LockedItems = Feats.LockedItems(Profile);
 
     // ═════════════════════════ Files ═════════════════════════
 

@@ -30,6 +30,8 @@ public static class Meta
     {
         new("berserker", "colossus", "Defeat the Bone Colossus", 60),
         new("hexer", "matriarch", "Defeat the Drowned Matriarch", 90),
+        new("alchemist", "mother_bloom", "Defeat the Mother Bloom", 110),
+        new("spellblade", "archivist", "Defeat the Archivist", 130),
     };
 
     public static int Level(Profile p, string id) => p.Upgrades.GetValueOrDefault(id);
@@ -63,7 +65,8 @@ public static class Meta
     public static int ShardsFor(RunState run, bool won)
     {
         int shards = (run.Floor + 1) * 2 + run.Stats.ElitesSlain * 3 + run.BossesKilled * 10 + (won ? 30 + run.Heat * 5 : 0);
-        if (run.Daily is not null) shards = (int)Math.Round(shards * 1.5);
+        if (run.Daily is not null || run.Weekly is not null) shards = (int)Math.Round(shards * 1.5);
+        shards += run.Loop * 25;
         return shards;
     }
 
@@ -77,6 +80,7 @@ public static class Meta
         run.Haggler = Level(p, "haggler") > 0;
         foreach (var hero in run.Party)
         {
+            Mastery.ApplyLoadout(hero, p, p.CostumeOn.Contains(hero.Id), p.AltOn.Contains(hero.Id));
             hero.BonusMaxHp += 5 * Level(p, "ember_heart");
             if (Level(p, "veterans") > 0 && hero.Level < 2) hero.AddXp(HeroState.XpForLevel(2) - hero.Xp);
             hero.Hp = hero.MaxHp;

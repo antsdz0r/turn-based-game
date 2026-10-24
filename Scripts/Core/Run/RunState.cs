@@ -14,6 +14,28 @@ public sealed class RunStats
     public int BattlesWon { get; set; }
     public int ElitesSlain { get; set; }
     public double Seconds { get; set; }
+    public int Combos { get; set; }
+    public int Breaks { get; set; }
+    public int Bounties { get; set; }
+    /// <summary>Direct damage per hero id, and the biggest single hit of the run.</summary>
+    public Dictionary<string, int> HeroDamage { get; set; } = new();
+    public int BestHit { get; set; }
+    public string? BestHitBy { get; set; }
+    /// <summary>What ended a lost run (enemy names of the last fight).</summary>
+    public string? DefeatedBy { get; set; }
+    /// <summary>Region keys whose boss fell this run (feats count them across runs).</summary>
+    public List<string> RegionsCleared { get; set; } = new();
+
+    /// <summary>Adds a finished battle's per-hero damage and best hit.</summary>
+    public void AddBattle(Battle battle)
+    {
+        foreach (var (hero, dmg) in battle.DamageByHero) HeroDamage[hero] = HeroDamage.GetValueOrDefault(hero) + dmg;
+        if (battle.BestHit > BestHit)
+        {
+            BestHit = battle.BestHit;
+            BestHitBy = battle.BestHitBy;
+        }
+    }
 }
 
 public enum RewardKind { Equipment, Relic, Consumable, Upgrade, Gold }
@@ -35,6 +57,8 @@ public sealed class BattleResult
     public List<string> Lines { get; set; } = new();
     public List<RewardOption> Choices { get; set; } = new();
     public bool Elite { get; set; }
+    /// <summary>Boss victory: rewards (and rerolls) always include a signature weapon.</summary>
+    public bool Boss { get; set; }
     public bool Golden { get; set; }
     public int Rerolls { get; set; }
 }
@@ -82,6 +106,32 @@ public sealed class RunState
     public string? DailyDate { get; set; }
     /// <summary>Silver Tongue shrine upgrade: cheaper shops and rerolls.</summary>
     public bool Haggler { get; set; }
+    /// <summary>Region key for each act (0-4). Empty in saves from before regions were shuffled: the classic order.</summary>
+    public List<string> RegionOrder { get; set; } = new();
+    /// <summary>Weekly challenge week id and its mutators (empty for normal runs).</summary>
+    public string? Weekly { get; set; }
+    public List<string> Mutators { get; set; } = new();
+    public bool Has(string mutator) => Mutators.Contains(mutator);
+    /// <summary>Endless mode: how many times the party has gone round the vault after beating the Hollow King.</summary>
+    public int Loop { get; set; }
+    public BankedStats? Banked { get; set; }
+
+    /// <summary>The battle in progress (seed, starting consumables and commands so far), so quitting mid-fight resumes it.</summary>
+    public BattleSave? ActiveBattle { get; set; }
+
+    /// <summary>The region played in this act of the run.</summary>
+    public RegionDef RegionAt(int act) =>
+        act >= 0 && act < RegionOrder.Count ? Database.RegionByKey(RegionOrder[act]) : Database.Region(act);
+
+    /// <summary>The crypt opens and the Cinder Throne closes every run; three of the five middle regions fill acts 1-3,
+    /// shallower regions first (ties broken by the seed).</summary>
+    public static List<string> RollRegionOrder(Random rng)
+    {
+        var middle = Database.MiddleRegions.OrderBy(_ => rng.Next()).Take(DungeonMap.RegionCount - 2)
+            .Select(key => (key, act: Database.RegionByKey(key).Act, tie: rng.Next()))
+            .OrderBy(r => r.act).ThenBy(r => r.tie).Select(r => r.key);
+        return new List<string> { "crypt" }.Concat(middle).Append("cinder").ToList();
+    }
 
     [JsonIgnore] public MapNode? Node => CurrentNode >= 0 ? Map.Node(CurrentNode) : null;
     [JsonIgnore] public int Floor => Node?.Floor ?? 0;
@@ -95,9 +145,9 @@ public sealed class RunState
             return Math.Min(DungeonMap.RegionCount - 1, node.Region + (advanced ? 1 : 0));
         }
     }
-    [JsonIgnore] public RegionDef CurrentRegionDef => Database.Region(CurrentRegion);
+    [JsonIgnore] public RegionDef CurrentRegionDef => RegionAt(CurrentRegion);
     /// <summary>Region of the room being played right now (used for backgrounds and music in battles, shops...).</summary>
-    [JsonIgnore] public RegionDef NodeRegion => Database.Region(Node?.Region ?? 0);
+    [JsonIgnore] public RegionDef NodeRegion => RegionAt(Node?.Region ?? 0);
     /// <summary>Equipment tier rewards can roll at the current depth.</summary>
     [JsonIgnore] public int MaxTier => Floor >= 10 ? 3 : Floor >= 4 ? 2 : 1;
 
@@ -112,6 +162,7 @@ public sealed class RunState
             run.Party.Add(hero);
         }
         run.Map = DungeonMap.Generate(new Random(seed));
+        run.RegionOrder = RollRegionOrder(new Random(unchecked(seed * 31 + 17)));
         run.Consumables.Add("potion");
         run.Consumables.Add("tonic");
         return run;
@@ -180,22 +231,44 @@ public sealed class RunState
     {
         var node = Node ?? Map.OnFloor(0).First();
         var rng = NodeRng(1);
-        var ids = ForcedEncounter?.ToArray() ?? Database.PickEncounter(node.Type, node.Floor, rng);
+        // Resuming a saved battle: same seed and the consumables it started with (the replay uses them again).
+        var save = ActiveBattle is { } active && active.Node == CurrentNode ? active : null;
+        if (save is not null)
+        {
+            Consumables.Clear();
+            Consumables.AddRange(save.Consumables);
+        }
+        int seed = save?.Seed ?? Seed + CurrentNode * 977 + (int)(Stats.Seconds * 10) % 1000;
+        ActiveBattle = save ?? new BattleSave { Node = CurrentNode, Seed = seed, Consumables = Consumables.ToList() };
+        var region = RegionAt(node.Region);
+        var ids = ForcedEncounter?.ToArray() ?? Database.PickEncounter(node.Type, region, node.Floor, rng);
         foreach (var hero in Party) if (hero.Hp <= 0) hero.Hp = 1;
         var enemies = Database.CreateEncounter(ids, node.Floor, Heat);
+        if (ForcedEncounter is null) Database.ScaleForAct(enemies, region, node.Region);
+        if (Mutators.Count > 0) Core.Weekly.ApplyToEnemies(this, enemies);
+        Endless.Scale(enemies, Loop);
         if (ForcedElite) foreach (var e in enemies.Where(e => !e.IsBoss)) e.MaxHp = e.Hp = (int)Math.Round(e.MaxHp * 1.2);
-        EnemyMods.Roll(enemies, node.Region, NodeRng(9));
+        EnemyMods.Roll(enemies, node.Region, NodeRng(9), Heat);
         return new BattleSetup
         {
-            Heroes = Party.Select(Database.CreateHero).ToList(),
+            Heroes = WithSynergies(Party.Select(Database.CreateHero).ToList()),
             Enemies = enemies,
             Daily = Daily,
             Heat = Heat,
             Relics = new HashSet<string>(Relics),
             Consumables = Consumables,
             Floor = node.Floor,
-            Seed = Seed + CurrentNode * 977 + (int)(Stats.Seconds * 10) % 1000,
+            Seed = seed,
+            Omen = ForcedEncounter is null ? (Has("omens") && node.Type != NodeType.Boss ? Omens.All[NodeRng(12).Next(Omens.All.Count)].Id : Omens.Roll(node.Type, node.Floor, NodeRng(12))) : null,
+            Bounty = Has("bounties") ? Bounties.All[NodeRng(13).Next(Bounties.All.Count)].Id : Bounties.Roll(ForcedElite ? NodeType.Elite : node.Type, NodeRng(13)),
+            Mutators = new HashSet<string>(Mutators),
         };
+    }
+
+    private static List<Combatant> WithSynergies(List<Combatant> heroes)
+    {
+        Database.ApplySynergies(heroes);
+        return heroes;
     }
 
     /// <summary>Applies a won battle: HP, gold, XP, levels, stats, and builds 3 reward choices.</summary>
@@ -205,6 +278,7 @@ public sealed class RunState
         bool elite = node?.Type == NodeType.Elite || ForcedElite;
         bool boss = node?.Type == NodeType.Boss;
         if (boss) BossesKilled++;
+        ActiveBattle = null;
         ForcedEncounter = null;
         ForcedElite = false;
         var result = new BattleResult();
@@ -221,6 +295,8 @@ public sealed class RunState
 
         int gold = battle.Enemies.Where(e => !e.Summoned).Sum(e => e.Enemy?.Gold ?? 0) + rng.Next(0, 8);
         if (Relics.Contains("gilded_purse")) gold = (int)Math.Round(gold * 1.3);
+        if (Has("pauper")) gold /= 2;
+        if (Relics.Contains("greed_idol")) gold = (int)Math.Round(gold * 1.6);
         bool golden = node?.Golden == true;
         if (golden)
         {
@@ -240,6 +316,21 @@ public sealed class RunState
                 result.Lines.Add($"[color=#ffd76b]{hero.Def.Name} reached level {hero.Level}![/color] +{HeroState.HpPerLevel} max HP, +{HeroState.PowerPerLevel}% damage");
         }
 
+        // Bounty: the optional objective pays out on a win.
+        if (Bounties.Get(battle.Bounty) is { } bounty && battle.BountyMet)
+        {
+            int pay = bounty.Gold * (Has("bounties") ? 2 : 1);
+            Gold += pay;
+            result.Gold += pay;
+            result.Lines.Add($"[color=#ffd76b]Bounty complete: {bounty.Name}[/color] +{pay} gold");
+            Stats.Bounties++;
+        }
+        Stats.Combos += battle.CombosTriggered;
+        Stats.Breaks += battle.Breaks;
+        Stats.AddBattle(battle);
+        if (boss && node is not null && !Stats.RegionsCleared.Contains(RegionAt(node.Region).Key))
+            Stats.RegionsCleared.Add(RegionAt(node.Region).Key);
+
         Stats.EnemiesSlain += battle.EnemiesSlain;
         Stats.DamageDealt += battle.DamageDealt;
         Stats.GoldEarned += gold;
@@ -249,14 +340,15 @@ public sealed class RunState
         if (boss && node is not null && !DungeonMap.IsFinalRegion(node.Region))
         {
             HealParty(40);
-            var next = Database.Region(node.Region + 1);
-            result.Lines.Add($"[color=#ffd76b]{Database.Region(node.Region).Name} cleared![/color] The party rests: +40% HP.");
+            var next = RegionAt(node.Region + 1);
+            result.Lines.Add($"[color=#ffd76b]{RegionAt(node.Region).Name} cleared![/color] The party rests: +40% HP.");
             result.Lines.Add($"Ahead lies [color=#ffa040]{next.Name}[/color].");
         }
 
         result.Elite = elite || boss;
+        result.Boss = boss;
         result.Golden = golden;
-        result.Choices = RollRewards(rng, (elite || boss) && Daily != "relics", golden ? 4 : 3);
+        result.Choices = RollRewards(rng, (elite || boss) && Daily != "relics", golden ? 4 : 3, boss);
         return result;
     }
 
@@ -271,15 +363,17 @@ public sealed class RunState
         if (Gold < price) return false;
         Gold -= price;
         result.Rerolls++;
-        result.Choices = RollRewards(NodeRng(40 + result.Rerolls), result.Elite, result.Golden ? 4 : 3);
+        result.Choices = RollRewards(NodeRng(40 + result.Rerolls), result.Elite, result.Golden ? 4 : 3, result.Boss);
         return true;
     }
 
-    private List<RewardOption> RollRewards(Random rng, bool elite, int count = 3)
+    private List<RewardOption> RollRewards(Random rng, bool elite, int count = 3, bool boss = false)
     {
         var choices = new List<RewardOption>();
         int maxTier = MaxTier;
         if (elite && Database.RandomRelic(rng, Relics) is { } relic) choices.Add(RelicOption(relic));
+        // Bosses always offer a signature weapon: a reward that can redirect the build.
+        if (boss && Database.RandomFamilyWeapon(rng, maxTier) is { } weapon) choices.Add(EquipmentOption(weapon));
 
         int guard = 0;
         while (choices.Count < count && guard++ < 50)
@@ -298,10 +392,18 @@ public sealed class RunState
         return choices;
     }
 
+    /// <summary>What every hero has in this item's slot right now (shown next to equipment rewards and shop items).</summary>
+    public string EquippedSummary(ItemDef item)
+    {
+        if (!item.IsEquipment) return "";
+        return "Now: " + string.Join("  ·  ", Party.Select(h =>
+            $"{h.Def.Name.Split(' ')[0]} {(h.GetSlot(item.Slot) is { } id && Database.HasItem(id) ? Database.Item(id).Name : "(empty)")}"));
+    }
+
     public static RewardOption EquipmentOption(ItemDef item) => new()
     {
         Kind = RewardKind.Equipment, Id = item.Id, Title = item.Name,
-        Description = $"{item.Kind}: {item.Description}",
+        Description = $"{item.Rarity} {(item.Family ?? item.Kind.ToString())}: {item.Description}",
     };
 
     public static RewardOption ConsumableOption(ItemDef item) => new()
@@ -317,7 +419,7 @@ public sealed class RunState
     /// <summary>A random not-yet-upgraded ability of a random hero, or null.</summary>
     public RewardOption? UpgradeOption(Random rng)
     {
-        var options = Party.SelectMany(h => h.Def.Abilities.Append(h.Def.BasicAbility)
+        var options = Party.SelectMany(h => h.AbilityIds.Append(h.Def.BasicAbility)
                 .Where(a => !h.Upgrades.Contains(a))
                 .Select(a => (hero: h, ability: a)))
             .ToList();
@@ -328,7 +430,7 @@ public sealed class RunState
         {
             Kind = RewardKind.Upgrade, Id = abilityId, HeroId = hero.Id,
             Title = $"{ability.Name}+",
-            Description = $"Upgrade {hero.Def.Name}'s {ability.Name}: +35% effect, +1 status potency/duration, -1 cooldown.",
+            Description = $"Upgrade {hero.Def.Name}'s {ability.Name}: {ability.UpgradeSummary}",
         };
     }
 
@@ -458,9 +560,9 @@ public sealed class RunState
         var rng = NodeRng(4);
         Shop = new List<ShopEntry>();
         int maxTier = MaxTier;
-        var gear = Database.AllItems.Where(i => i.IsEquipment && i.Tier <= maxTier).OrderBy(_ => rng.Next()).Take(3);
+        var gear = Database.OfferedItems.Where(i => i.IsEquipment && i.Tier <= maxTier).OrderBy(_ => rng.Next()).Take(3);
         foreach (var item in gear) Shop.Add(new ShopEntry { Kind = RewardKind.Equipment, Id = item.Id, Price = Price(item.Price) });
-        var potions = Database.AllItems.Where(i => !i.IsEquipment).OrderBy(_ => rng.Next()).Take(3);
+        var potions = Database.OfferedItems.Where(i => !i.IsEquipment).OrderBy(_ => rng.Next()).Take(3);
         foreach (var item in potions) Shop.Add(new ShopEntry { Kind = RewardKind.Consumable, Id = item.Id, Price = Price(item.Price) });
         if (Database.RandomRelic(rng, Relics) is { } relic)
             Shop.Add(new ShopEntry { Kind = RewardKind.Relic, Id = relic.Id, Price = Price(relic.Price) });
@@ -497,16 +599,16 @@ public sealed class RunState
 
     private int Price(int basePrice) =>
         (int)Math.Round(basePrice * (Heat >= 3 ? 1.2 : 1.0) * (Node?.Golden == true ? 0.75 : 1.0)
-                        * (Haggler ? 0.85 : 1.0) * (Daily == "rich" ? 1.5 : 1.0));
+                        * (Haggler ? 0.85 : 1.0) * (Daily == "rich" ? 1.5 : 1.0) * (Has("pauper") ? 0.6 : 1.0) * (Relics.Contains("greed_idol") ? 1.3 : 1.0));
     [JsonIgnore] public int HealServicePrice => Price(ShopHealPrice);
     [JsonIgnore] public int UpgradeServicePrice => Price(ShopUpgradePrice);
-    [JsonIgnore] public int RestHealPct => (Heat >= 4 ? 25 : 35) + (Node?.Golden == true ? 20 : 0);
+    [JsonIgnore] public int RestHealPct => Relics.Contains("bloodstone_crown") ? 0 : (Heat >= 4 ? 25 : 35) + (Node?.Golden == true ? 20 : 0);
 
     public bool Upgrade(string heroId, string abilityId)
     {
         var hero = Hero(heroId);
         if (hero.Upgrades.Contains(abilityId)) return false;
-        if (abilityId != hero.Def.BasicAbility && !hero.Def.Abilities.Contains(abilityId)) return false;
+        if (abilityId != hero.Def.BasicAbility && !hero.AbilityIds.Contains(abilityId)) return false;
         hero.Upgrades.Add(abilityId);
         return true;
     }

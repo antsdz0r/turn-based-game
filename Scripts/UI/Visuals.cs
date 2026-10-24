@@ -111,7 +111,7 @@ public static class Visuals
         theme.SetStylebox("panel", "PanelContainer", FramedPanel());
         theme.SetStylebox("panel", "TooltipPanel", Box(new Color("#0b0910"), new Color("#8a6640"), 2, 6, 10));
         theme.SetColor("font_color", "TooltipLabel", Text);
-        theme.SetFontSize("font_size", "TooltipLabel", 14);
+        theme.SetFontSize("font_size", "TooltipLabel", Scaled(14));
         theme.SetColor("font_color", "Label", Text);
         theme.SetColor("default_color", "RichTextLabel", Text);
 
@@ -133,9 +133,13 @@ public static class Visuals
 
     // ───────────── Widgets ─────────────
 
+    /// <summary>A font size scaled by the Text size accessibility setting.</summary>
+    public static int Scaled(int size) => (int)Math.Round(size * GameSession.Settings.TextScale);
+
     public static Godot.Label Label(string text, int size, Color color, bool serif = false, int outline = -1)
     {
         var label = new Godot.Label { Text = text, MouseFilter = Control.MouseFilterEnum.Ignore };
+        size = Scaled(size);
         label.AddThemeFontSizeOverride("font_size", size);
         label.AddThemeColorOverride("font_color", color);
         int outlineSize = outline >= 0 ? outline : Math.Max(4, size / 5);
@@ -162,8 +166,8 @@ public static class Visuals
             TextureFilter = CanvasItem.TextureFilterEnum.Nearest,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         };
-        rich.AddThemeFontSizeOverride("normal_font_size", size);
-        rich.AddThemeFontSizeOverride("bold_font_size", size);
+        rich.AddThemeFontSizeOverride("normal_font_size", Scaled(size));
+        rich.AddThemeFontSizeOverride("bold_font_size", Scaled(size));
         return rich;
     }
 
@@ -182,7 +186,7 @@ public static class Visuals
             button.Icon = Tex(icon);
             button.ExpandIcon = true;
         }
-        button.AddThemeFontSizeOverride("font_size", fontSize);
+        button.AddThemeFontSizeOverride("font_size", Scaled(fontSize));
         button.Pressed += () =>
         {
             Audio.Sfx(button, "click", 0.05f);
@@ -205,10 +209,11 @@ public static class Visuals
         };
     }
 
+    /// <summary>A hero portrait. Heroes in the current run wear their chosen costume (pass a costume sprite to force one).</summary>
     public static TextureRect Portrait(string heroId, int size = 64)
     {
-        var rect = Icon($"Portraits/{heroId}.png", size);
-        return rect;
+        string look = GameSession.StoryRun?.Party.FirstOrDefault(h => h.Id == heroId)?.Costume ?? heroId;
+        return Icon($"Portraits/{look}.png", size);
     }
 
     public static Control Spacer(float height = 0, float width = 0) =>
@@ -307,7 +312,14 @@ public static class Visuals
 
     // ───────────── Game vocabulary ─────────────
 
-    public static Color ElementColor(Element element) => element switch
+    /// <summary>Element colours; the colour-blind palette (Okabe-Ito) keeps all four distinct for every kind of colour vision.</summary>
+    public static Color ElementColor(Element element) => GameSession.Settings.ColorblindMode ? element switch
+    {
+        Element.Fire => new Color("#e69f00"),
+        Element.Ice => new Color("#56b4e9"),
+        Element.Lightning => new Color("#f0e442"),
+        _ => new Color("#ffffff"),
+    } : element switch
     {
         Element.Fire => new Color("#ff7a3d"),
         Element.Ice => new Color("#7fd4ff"),
@@ -346,24 +358,47 @@ public static class Visuals
         _ => kind.ToString(),
     };
 
+    /// <summary>What a status does, how long it lasts and how it stacks (unit and icon tooltips).</summary>
     public static string StatusDescription(StatusEffect s) => s.Kind switch
     {
-        StatusKind.Poison => $"Poison {s.Amount}: takes {s.Amount} damage at turn start, then -1.",
-        StatusKind.Burn => $"Burn {s.Amount}: takes {s.Amount} damage at turn start ({s.Turns} turns).",
-        StatusKind.Bleed => $"Bleed {s.Amount}: takes {s.Amount} damage at turn start, ignoring armor and shields ({s.Turns} turns).",
+        StatusKind.Poison => $"Poison {s.Amount}: takes {s.Amount} damage at turn start, then -1. Stacks (max {Battle.MaxPoison}). Defend shakes it off.",
+        StatusKind.Burn => $"Burn {s.Amount}: takes {s.Amount} damage at turn start ({s.Turns} turns). Reapplying keeps the stronger one.",
+        StatusKind.Bleed => $"Bleed {s.Amount}: takes {s.Amount} damage at turn start, ignoring armor and shields ({s.Turns} turns). Defend shakes it off.",
         StatusKind.Regen => $"Regen {s.Amount}: heals {s.Amount} at turn start ({s.Turns} turns).",
-        StatusKind.Stun => "Stunned: skips the next turn.",
-        StatusKind.Shield => $"Shield {s.Amount}: absorbs damage ({s.Turns} turns).",
-        StatusKind.Marked => $"Marked: takes +25% damage; attackers get +20% crit, +10% accuracy ({s.Turns} turns).",
-        StatusKind.Weakened => $"Weakened: deals -25% damage ({s.Turns} turns).",
+        StatusKind.Stun => "Stunned: skips the next turn. Afterwards it shrugs off new stuns until the end of the next round.",
+        StatusKind.Shield => $"Shield {s.Amount}: absorbs damage ({s.Turns} turns). Stacks up to max HP.",
+        StatusKind.Marked => $"Marked: takes +25% damage; attackers get +20% crit ({s.Turns} turns). Cleanse removes it.",
+        StatusKind.Weakened => $"Weakened: deals -25% damage ({s.Turns} turns). Reapplying refreshes the duration.",
         StatusKind.Empowered => $"Empowered: deals +25% damage ({s.Turns} turns).",
         StatusKind.Taunt => $"Taunting: enemies must target this hero ({s.Turns} turns).",
-        StatusKind.Slowed => $"Slowed: -3 speed ({s.Turns} turns).",
+        StatusKind.Slowed => $"Slowed: -3 speed, acts later ({s.Turns} turns).",
         StatusKind.Defending => "Defending: takes -50% damage until its next turn.",
-        StatusKind.Riposte => $"Riposte: counters melee attackers for {s.Amount}.",
+        StatusKind.Riposte => $"Riposte: counters melee attackers for {s.Amount} until its next turn.",
         StatusKind.Guarded => "Protected: attacks hit the protector instead.",
         _ => s.Kind.ToString(),
     };
+
+    /// <summary>The top-most visible, enabled button under root (later children are searched first: overlays win).</summary>
+    public static BaseButton? FirstFocusable(Node root)
+    {
+        if (root is CanvasItem { Visible: false }) return null;
+        var children = root.GetChildren();
+        for (int i = children.Count - 1; i >= 0; i--)
+        {
+            // Overlays are added last, so search them first; within one container, prefer the first button.
+            if (children[i] is Container or ScrollContainer) continue;
+            if (FirstFocusable(children[i]) is { } found) return found;
+        }
+        for (int i = 0; i < children.Count; i++)
+        {
+            if (children[i] is not (Container or ScrollContainer)) continue;
+            if (FirstFocusable(children[i]) is { } found) return found;
+        }
+        return root is BaseButton { Disabled: false, FocusMode: not Control.FocusModeEnum.None } button && button.IsVisibleInTree() ? button : null;
+    }
+
+    /// <summary>Rarity color: Common grey, Rare blue, Legendary gold.</summary>
+    public static string RarityHex(ItemDef item) => item.Tier switch { <= 1 => "#c9bfae", 2 => "#7fb8ff", _ => "#ffc94a" };
 
     public static string AffinityText(Combatant unit)
     {
@@ -542,6 +577,8 @@ public static class Visuals
             "cinder" => new Color(1f, 0.55f, 0.4f, 0.35f),
             "frost" => new Color(0.9f, 0.97f, 1f, 0.65f),
             "storm" => new Color(0.6f, 0.62f, 0.8f, 0.5f),
+            "garden" => new Color(0.7f, 0.95f, 0.6f, 0.4f),
+            "archive" => new Color(0.85f, 0.75f, 0.95f, 0.35f),
             _ => new Color(0.85f, 0.85f, 1f, 0.45f),
         };
         for (int layer = 0; layer < 2; layer++)
@@ -593,7 +630,8 @@ public static class Visuals
                 Color = new Color(0.6f, 0.7f, 0.9f, 0.45f),
             };
             parent.AddChild(rain);
-            // Lightning: the whole screen flashes every few seconds.
+            // Lightning: the whole screen flashes every few seconds (not with Reduce motion & flashes).
+            if (GameSession.Settings.ReduceMotion) return;
             var flash = new ColorRect { Color = new Color(0.85f, 0.9f, 1f, 0f), MouseFilter = Control.MouseFilterEnum.Ignore };
             flash.SetAnchorsPreset(Control.LayoutPreset.FullRect);
             parent.AddChild(flash);
@@ -635,6 +673,51 @@ public static class Visuals
             var tween = haze.CreateTween().SetLoops();
             tween.TweenProperty(haze, "color:a", 0.14f, 3.5).SetTrans(Tween.TransitionType.Sine);
             tween.TweenProperty(haze, "color:a", 0.02f, 3.5).SetTrans(Tween.TransitionType.Sine);
+        }
+        else if (region == "garden")
+        {
+            // Drifting spores and the odd glowing firefly.
+            var spores = new CpuParticles2D
+            {
+                Amount = 50, Lifetime = 10, Preprocess = 10,
+                Position = new Vector2(size.X / 2, size.Y * 0.5f),
+                EmissionShape = CpuParticles2D.EmissionShapeEnum.Rectangle,
+                EmissionRectExtents = new Vector2(size.X / 2, size.Y * 0.4f),
+                Direction = new Vector2(0.2f, -1), Spread = 60,
+                InitialVelocityMin = 4, InitialVelocityMax = 14,
+                Gravity = new Vector2(2, -2),
+                ScaleAmountMin = 1.5f, ScaleAmountMax = 3,
+                ColorRamp = new Gradient
+                {
+                    Colors = new[] { new Color(0.85f, 1f, 0.5f, 0f), new Color(0.85f, 1f, 0.5f, 0.75f), new Color(0.9f, 0.6f, 0.7f, 0f) },
+                    Offsets = new[] { 0f, 0.5f, 1f },
+                },
+            };
+            parent.AddChild(spores);
+        }
+        else if (region == "archive")
+        {
+            // Loose pages drifting down through candlelight.
+            var pages = new CpuParticles2D
+            {
+                Amount = 14, Lifetime = 12, Preprocess = 12,
+                Position = new Vector2(size.X / 2, -10),
+                EmissionShape = CpuParticles2D.EmissionShapeEnum.Rectangle,
+                EmissionRectExtents = new Vector2(size.X / 2 + 40, 4),
+                Direction = new Vector2(0.1f, 1), Spread = 20,
+                InitialVelocityMin = 12, InitialVelocityMax = 26,
+                Gravity = new Vector2(0, 2),
+                AngularVelocityMin = -40, AngularVelocityMax = 40,
+                ScaleAmountMin = 4, ScaleAmountMax = 6,
+                Color = new Color(0.92f, 0.86f, 0.75f, 0.55f),
+            };
+            parent.AddChild(pages);
+            var glow = new ColorRect { Color = new Color(0.5f, 0.2f, 0.6f, 0.0f), MouseFilter = Control.MouseFilterEnum.Ignore };
+            glow.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            parent.AddChild(glow);
+            var tween = glow.CreateTween().SetLoops();
+            tween.TweenProperty(glow, "color:a", 0.07f, 4.0).SetTrans(Tween.TransitionType.Sine);
+            tween.TweenProperty(glow, "color:a", 0.01f, 4.0).SetTrans(Tween.TransitionType.Sine);
         }
         else if (region == "cinder")
         {

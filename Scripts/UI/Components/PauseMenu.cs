@@ -6,6 +6,7 @@ namespace TBRPG.UI;
 /// <summary>Esc menu: resume, settings, save &amp; quit to menu, abandon run. Pauses the tree while open.</summary>
 public partial class PauseMenu : Control
 {
+    private Godot.Button? _resume;
     private readonly bool _inRun;
     private VBoxContainer _menu = null!;
     private SettingsPanel? _settings;
@@ -35,7 +36,8 @@ public partial class PauseMenu : Control
         title.HorizontalAlignment = HorizontalAlignment.Center;
         _menu.AddChild(title);
         _menu.AddChild(Visuals.Separator());
-        _menu.AddChild(Visuals.Button("Resume", Close, new Vector2(280, 46)));
+        _resume = Visuals.Button("Resume", Close, new Vector2(280, 46));
+        _menu.AddChild(_resume);
         _menu.AddChild(Visuals.Button("Settings", OpenSettings, new Vector2(280, 46)));
         if (_inRun)
         {
@@ -66,6 +68,7 @@ public partial class PauseMenu : Control
         if (_abandon is not null) _abandon.Text = "Abandon Run";
         GetTree().Paused = true;
         MoveToFront();
+        _resume?.CallDeferred(Control.MethodName.GrabFocus);
     }
 
     public void Close()

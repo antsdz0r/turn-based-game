@@ -38,6 +38,8 @@ public partial class Compendium : Screen
         header.AddChild(Visuals.Button("Enemies", ShowEnemies, new Vector2(110, 40), 15));
         header.AddChild(Visuals.Button("Relics", ShowRelics, new Vector2(110, 40), 15));
         header.AddChild(Visuals.Button("Items", ShowItems, new Vector2(110, 40), 15));
+        header.AddChild(Visuals.Button("Run History", ShowHistory, new Vector2(130, 40), 15));
+        header.AddChild(Visuals.Button("Lore", ShowLore, new Vector2(90, 40), 15));
         header.AddChild(Visuals.Button("Main Menu", () => GameSession.ChangeScene(GetTree(), GameSession.MenuScene), new Vector2(130, 40), 15));
 
         var scroll = new ScrollContainer { SizeFlagsVertical = SizeFlags.ExpandFill, HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
@@ -53,6 +55,7 @@ public partial class Compendium : Screen
     public override void _UnhandledInput(InputEvent @event)
     {
         if (@event.IsActionPressed("ui_cancel")) GameSession.ChangeScene(GetTree(), GameSession.MenuScene);
+        else base._UnhandledInput(@event);   // arrows / Tab focus the first button
     }
 
     private void Clear()
@@ -98,6 +101,13 @@ public partial class Compendium : Screen
                 sb.Append($"{Visuals.Img(Visuals.AbilityIcon(a), 16)} [b]{a.Name}[/b] — {a.Description} [color=#a99f8f]({a.RulesText(false).Split('\n').Last()})[/color]\n");
             }
             sb.Append("[color=#ffd76b]Traits:[/color] [color=#a99f8f]" + string.Join(", ", Database.TraitsFor(def.Id).Select(t => t.Name)) + "[/color]");
+            var prof = GameSession.Profile;
+            int lv = Mastery.Level(prof, def.Id), next = Mastery.NextThreshold(prof, def.Id);
+            sb.Append($"\n[color=#9fd8ff]Mastery: {Mastery.LevelName(lv)}[/color] [color=#a99f8f]({Mastery.Xp(prof, def.Id)}{(next > 0 ? $"/{next}" : "")} XP)[/color]");
+            if (Mastery.Costume(def.Id) is { } costume)
+                sb.Append($"\n[color=#a99f8f]Costume (Adept): [b]{costume.Name}[/b] — {costume.Description}[/color]");
+            if (Mastery.Alt(def.Id) is { } alt)
+                sb.Append($"\n[color=#a99f8f]Alternative ability (Veteran): [b]{Database.Ability(alt.AbilityId).Name}[/b] instead of {Database.Ability(alt.Replaces).Name}[/color]");
             AddEntry(Visuals.Portrait(def.Id, 96), sb.ToString().TrimEnd());
         }
     }
@@ -153,7 +163,51 @@ public partial class Compendium : Screen
         {
             var icon = Visuals.Icon("UI/icon_relic.png", 48);
             icon.Modulate = new Color(relic.ColorHex);
-            AddEntry(icon, $"[font_size=18][color={relic.ColorHex}]{relic.Name}[/color][/font_size]\n{relic.Description}");
+            AddEntry(icon, $"[font_size=18][color={relic.ColorHex}]{relic.Name}[/color][/font_size]{(relic.Pact ? " [color=#ff6b6b](pact)[/color]" : "")}\n{Database.RelicText(relic)}");
+        }
+    }
+
+    private void ShowLore()
+    {
+        Clear();
+        var p = GameSession.Profile;
+        AddEntry(Visuals.Icon("UI/icon_feather.png", 48),
+            $"[font_size=20][color=#ffd76b]The Keepers' Codex[/color][/font_size]  [color=#a99f8f]{p.LoreFound.Count}/{Lore.Pages.Count} pages found[/color]");
+        foreach (var page in Lore.Pages)
+        {
+            bool found = p.LoreFound.Contains(page.Id);
+            bool fresh = p.LoreNew.Contains(page.Id);
+            string icon = page.Id.StartsWith("boss_") ? "UI/icon_node_boss.png" : page.Id.StartsWith("region_") ? "UI/icon_node_event.png" : "UI/icon_fire.png";
+            var image = Visuals.Icon(icon, 40);
+            if (!found) image.Modulate = new Color(0.3f, 0.3f, 0.35f);
+            AddEntry(image, found
+                ? $"[font_size=18][color=#ffd76b]{page.Title}[/color][/font_size]{(fresh ? " [color=#7fd4a0]NEW[/color]" : "")}\n[i]{page.Text}[/i]"
+                : $"[font_size=18][color=#5e566a]???[/color][/font_size]\n[color=#5e566a]{page.Source}.[/color]");
+        }
+    }
+
+    private void ShowHistory()
+    {
+        Clear();
+        var p = GameSession.Profile;
+        if (p.History.Count == 0)
+        {
+            AddEntry(Visuals.Icon("UI/icon_fire.png", 48), "[color=#a99f8f]No finished runs yet. Your last 20 runs will be listed here.[/color]");
+            return;
+        }
+        foreach (var r in p.History)
+        {
+            string Name(string? id) => id is not null && Database.Heroes.Any(h => h.Id == id) ? Database.Hero(id).Name.Split(' ')[0] : "-";
+            string result = r.Won ? "[color=#7fd4a0]VICTORY[/color]" : $"[color=#ff7070]Fell on floor {r.Floor}[/color]";
+            string party = string.Join(", ", r.Party.Select(Name));
+            var text =
+                $"[font_size=17]{result}[/font_size]  [color=#a99f8f]{r.Date} · Heat {r.Heat}{(r.Daily is not null ? " · Daily" : "")} · {r.TimeText}[/color]\n" +
+                $"[color=#ffd76b]{party}[/color]  ·  [color=#c9bfae]{r.RouteText}[/color]\n" +
+                $"[color=#a99f8f]{r.EnemiesSlain} slain · {r.Damage} damage · {r.Bosses} bosses · {r.Combos} combos · {r.Breaks} breaks · " +
+                $"MVP {Name(r.Mvp)} ({r.MvpDamage}) · best hit {r.BestHit} by {Name(r.BestHitBy)} · +{r.Shards} shards[/color]" +
+                (r.DefeatedBy is { Length: > 0 } k ? $"\n[color=#ff9a8a]Fell to: {k}[/color]" : "") +
+                (r.Feats.Count > 0 ? $"\n[color=#ffd76b]Feats: {string.Join(", ", r.Feats)}[/color]" : "");
+            AddEntry(Visuals.Icon($"Portraits/{(r.Mvp ?? r.Party.FirstOrDefault() ?? "vanguard")}.png", 64), text);
         }
     }
 
@@ -162,7 +216,7 @@ public partial class Compendium : Screen
         Clear();
         foreach (var item in Database.AllItems.OrderBy(i => i.Kind).ThenBy(i => i.Tier))
         {
-            string tier = item.IsEquipment ? $"  ·  tier {item.Tier}" : "";
+            string tier = item.IsEquipment ? $"  ·  [color={Visuals.RarityHex(item)}]{item.Rarity}[/color]{(item.Family is { } family ? " " + family : "")}" : "";
             AddEntry(Visuals.Icon(Visuals.ItemIcon(item), 48),
                      $"[font_size=18][color=#ffd76b]{item.Name}[/color][/font_size]  [color=#a99f8f]{item.Kind}{tier}  ·  {item.Price}g[/color]\n{item.Description}");
         }

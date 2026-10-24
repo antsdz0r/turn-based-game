@@ -47,6 +47,7 @@ public partial class EmberShrine : Screen
     public override void _UnhandledInput(InputEvent @event)
     {
         if (@event.IsActionPressed("ui_cancel")) GameSession.ChangeScene(GetTree(), GameSession.MenuScene);
+        else base._UnhandledInput(@event);   // arrows / Tab focus the first button
     }
 
     private void Fill()
@@ -76,6 +77,23 @@ public partial class EmberShrine : Screen
         }
 
         _list.AddChild(Visuals.Separator());
+        int done = Feats.All.Count(f => p.FeatsClaimed.Contains(f.Id));
+        _list.AddChild(Visuals.Label($"Feats  ({done}/{Feats.All.Count})", 20, Visuals.Gold, serif: true));
+        _list.AddChild(Visuals.Label("Long-term goals across runs. Each pays shards once (at the end of the run that completes it); some unlock new weapons.", 13, Visuals.TextDim));
+        foreach (var f in Feats.All.OrderBy(f => p.FeatsClaimed.Contains(f.Id)))
+        {
+            bool claimed = p.FeatsClaimed.Contains(f.Id);
+            int progress = Feats.Progress(p, f);
+            string bar = f.Goal > 1 ? $"  [color=#a99f8f]{progress}/{f.Goal}[/color] " + ProgressBar(progress, f.Goal) : "";
+            string reward = $"[color=#ffb85a]+{f.Shards} shards[/color]"
+                            + (f.UnlocksItem is { } item && Database.HasItem(item) ? $"  ·  [color=#9fd8ff]Unlocks {Database.Item(item).Name}[/color]" : "");
+            var row = Row(Visuals.Icon(claimed ? "UI/icon_fire.png" : f.UnlocksItem is not null ? "UI/icon_weapon.png" : "UI/icon_relic.png", 40),
+                $"[font_size=17][color={(claimed ? "#7fd4a0" : "#ffd76b")}]{f.Name}[/color][/font_size]{bar}\n[color=#c9bfae]{f.Description}[/color]\n{(claimed ? "[color=#7fd4a0]Complete[/color]" : reward)}");
+            if (claimed) ((TextureRect)row.GetChild(0)).Modulate = new Color(1f, 0.85f, 0.6f);
+            else if (progress == 0) ((TextureRect)row.GetChild(0)).Modulate = new Color(0.45f, 0.45f, 0.5f);
+        }
+
+        _list.AddChild(Visuals.Separator());
         _list.AddChild(Visuals.Label("Blessings", 20, Visuals.Gold, serif: true));
         foreach (var u in Meta.Upgrades)
         {
@@ -97,7 +115,13 @@ public partial class EmberShrine : Screen
         }
     }
 
-    private HBoxContainer Row(Control icon, string bbcode)
+    private static string ProgressBar(int value, int goal)
+    {
+        int filled = (int)System.Math.Round(10.0 * value / System.Math.Max(1, goal));
+        return $"[color=#ffb85a]{new string('▰', filled)}[/color][color=#4a4058]{new string('▱', 10 - filled)}[/color]";
+    }
+
+        private HBoxContainer Row(Control icon, string bbcode)
     {
         var card = new PanelContainer();
         card.AddThemeStyleboxOverride("panel", Visuals.Box(new Color("#1a1520"), new Color("#3a3147"), 1, 6, 10));

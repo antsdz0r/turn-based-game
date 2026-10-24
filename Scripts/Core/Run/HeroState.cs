@@ -41,6 +41,17 @@ public sealed class HeroState
     public int BonusMaxHp { get; set; }
     public int BonusMaxHpPct { get; set; }
     public int BonusPowerPct { get; set; }
+    /// <summary>Mastery costume sprite (null = the default look).</summary>
+    public string? Costume { get; set; }
+    /// <summary>Mastery alternative ability brought instead of the usual one it replaces (null = none).</summary>
+    public string? AltAbility { get; set; }
+
+    /// <summary>The four abilities this hero brings (the alternative ability swapped in, if chosen).</summary>
+    [JsonIgnore] public IReadOnlyList<string> AbilityIds =>
+        AltAbility is { } alt && Mastery.Alternatives.FirstOrDefault(a => a.AbilityId == alt) is { } swap
+            ? Def.Abilities.Select(id => id == swap.Replaces ? alt : id).ToList()
+            : (IReadOnlyList<string>)Def.Abilities;
+    [JsonIgnore] public string Sprite => Costume ?? Id;
 
     [JsonIgnore] public bool HasTraitsLeft => Database.TraitsFor(Id).Count() > Traits.Count + PendingTraits;
 

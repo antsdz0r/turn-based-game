@@ -63,6 +63,23 @@ public sealed class AbilityDef
 
     public Vfx Vfx { get; init; } = Vfx.Melee;
 
+    // ── Upgrade twists: what the "+" version does differently, beyond bigger numbers ──
+    /// <summary>One-line description of the upgrade's twist (shown on upgrade offers and tooltips).</summary>
+    public string? UpText { get; init; }
+    public bool UpInterrupt { get; init; }
+    public bool UpIgnoresArmor { get; init; }
+    public int UpBreakBonus { get; init; }
+    public bool UpCleanse { get; init; }
+    /// <summary>The upgrade removes the row requirement.</summary>
+    public bool UpAnyRow { get; init; }
+    public List<StatusApply> UpApplies { get; init; } = new();
+
+    public bool EffectiveInterrupt(bool upgraded) => Interrupt || (upgraded && UpInterrupt);
+    public bool EffectiveIgnoresArmor(bool upgraded) => IgnoresArmor || (upgraded && UpIgnoresArmor);
+    public int EffectiveBreakBonus(bool upgraded) => BreakBonus + (upgraded ? UpBreakBonus : 0);
+    public bool EffectiveCleanse(bool upgraded) => Cleanse || (upgraded && UpCleanse);
+    public RowRequirement EffectiveRequires(bool upgraded) => upgraded && UpAnyRow ? RowRequirement.Any : Requires;
+
     public int HitCount => ElementSequence?.Length ?? Hits;
     public Element HitElement(int hit) => ElementSequence is { Length: > 0 } seq ? seq[hit % seq.Length] : Element;
 
@@ -78,7 +95,12 @@ public sealed class AbilityDef
     public int EffectiveCooldown(bool upgraded) => upgraded ? Math.Max(0, Cooldown - 1) : Cooldown;
 
     public IEnumerable<StatusApply> EffectiveApplies(bool upgraded) =>
-        upgraded ? Applies.Select(a => a with { Amount = a.Amount > 0 ? a.Amount + 1 : 0, Turns = a.Turns > 0 ? a.Turns + 1 : 0 }) : Applies;
+        upgraded
+            ? Applies.Select(a => a with { Amount = a.Amount > 0 ? a.Amount + 1 : 0, Turns = a.Turns > 0 ? a.Turns + 1 : 0 }).Concat(UpApplies)
+            : Applies;
+
+    /// <summary>Summary of everything the upgrade does (reward offers, upgrade picker).</summary>
+    public string UpgradeSummary => "+35% effect, +1 status potency/duration, -1 cooldown" + (UpText is null ? "." : $". [b]Twist:[/b] {UpText}");
 
     /// <summary>A full, generated rules description for tooltips.</summary>
     public string RulesText(bool upgraded)
@@ -92,7 +114,7 @@ public sealed class AbilityDef
         if (MinResource > 0) tags.Add($"Needs {MinResource}+");
         int cd = EffectiveCooldown(upgraded);
         if (cd > 0) tags.Add($"Cooldown {cd}");
-        if (Requires != RowRequirement.Any) tags.Add($"{Requires} row only");
+        if (EffectiveRequires(upgraded) != RowRequirement.Any) tags.Add($"{Requires} row only");
         if (SelfDamage > 0) tags.Add($"Costs {SelfDamage} HP");
         if (LifestealPct > 0) tags.Add($"Lifesteal {LifestealPct}%");
         if (Melee) tags.Add("Melee");
@@ -100,6 +122,7 @@ public sealed class AbilityDef
         if (Accuracy is > 0 and < 100) tags.Add($"{Accuracy}% accuracy");
         if (upgraded) tags.Add("UPGRADED");
         sb.Append(string.Join("  ·  ", tags));
+        if (upgraded && UpText is not null) sb.Append($"\n+ {UpText}");
         return sb.ToString();
     }
 }

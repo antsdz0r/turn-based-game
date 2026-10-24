@@ -15,7 +15,8 @@ public sealed record TurnStartEvent(Combatant Actor) : BattleEvent;
 
 /// <summary>A unit starts an action (lunge, cast, shoot...).</summary>
 /// <summary>Big = a powerful attack (charged moves, boss sweeps, hero ultimates/finishers): the UI plays a power-up.</summary>
-public sealed record ActionEvent(Combatant Actor, string Name, Vfx Vfx, Element Element, IReadOnlyList<Combatant> Targets, bool Big = false) : BattleEvent;
+/// <summary>Finisher: a big cashed-in ability (all-resource finishers, duo techniques, ultimates) that gets a cinematic in the UI.</summary>
+public sealed record ActionEvent(Combatant Actor, string Name, Vfx Vfx, Element Element, IReadOnlyList<Combatant> Targets, bool Big = false, bool Finisher = false) : BattleEvent;
 
 public sealed record HitEvent(Combatant Target, int Damage, int Absorbed, int HpAfter, Element? Element,
                               bool Crit, bool Weak, bool Resisted, bool Immune, bool Broken, DefenseQuality Defense) : BattleEvent;
@@ -52,6 +53,9 @@ public sealed record MoveRowEvent(Combatant Unit) : BattleEvent;
 public sealed record IntentsChangedEvent : BattleEvent;
 
 public sealed record BattleEndEvent(bool Victory) : BattleEvent;
+
+/// <summary>A team combo went off on this target (Shatter, Ignite, Overload, Frostbite).</summary>
+public sealed record ComboEvent(Combatant Target, string Name, string ColorHex) : BattleEvent;
 
 /// <summary>Targeting preview (not an event): expected result of an ability on one target.</summary>
 public sealed record AbilityPreview(int Damage, int HitChance, bool Weak, bool Resisted, bool Immune, bool Breaks,

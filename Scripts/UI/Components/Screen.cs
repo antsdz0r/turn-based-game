@@ -27,6 +27,22 @@ public partial class Screen : Control
     /// <summary>Builds the screen. Called once from _Ready.</summary>
     protected virtual void Build() { }
 
+    /// <summary>
+    /// Keyboard play everywhere: if nothing has focus when an arrow / Tab / Enter key is pressed, focus the first
+    /// usable button (overlays first, since they were added last). From there Godot's focus navigation takes over.
+    /// </summary>
+    public override void _UnhandledInput(InputEvent e)
+    {
+        if (!e.IsPressed() || GetViewport().GuiGetFocusOwner() is not null) return;
+        if (!(e.IsAction("ui_up") || e.IsAction("ui_down") || e.IsAction("ui_left") || e.IsAction("ui_right")
+              || e.IsAction("ui_focus_next") || e.IsAction("ui_accept"))) return;
+        if (Visuals.FirstFocusable(this) is { } button)
+        {
+            button.GrabFocus();
+            GetViewport().SetInputAsHandled();
+        }
+    }
+
     protected void AddBackdrop(Color tint, bool torches = true, bool embers = true)
     {
         Visuals.AddBackground(this, tint);
@@ -39,9 +55,12 @@ public partial class Screen : Control
     }
 
     /// <summary>Backdrop that matches a region: its background art, ambience and torches.</summary>
+    /// <summary>The background image added by AddRegionBackdrop (battles colour-grade it).</summary>
+    protected TextureRect? Backdrop { get; private set; }
+
     protected void AddRegionBackdrop(RegionDef region, float brightness = 1f, bool torches = true)
     {
-        Visuals.AddBackground(this, new Color(brightness, brightness, brightness), region.Background);
+        Backdrop = Visuals.AddBackground(this, new Color(brightness, brightness, brightness), region.Background);
         if (torches && region.Key != "drowned")
         {
             Glows.Add(Visuals.AddTorch(this, 0.2f, 0.24f));

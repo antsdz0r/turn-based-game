@@ -6,7 +6,7 @@ namespace TBRPG.Core;
 /// <summary>All game content. Split into partial files: heroes, enemies, items.</summary>
 public static partial class Database
 {
-    private static readonly Dictionary<string, AbilityDef> AbilityTable = BuildAbilities().ToDictionary(a => a.Id);
+    private static readonly Dictionary<string, AbilityDef> AbilityTable = BuildAbilities().Concat(BuildAbilitiesPack2()).Concat(BuildMasteryAbilities()).Concat(BuildDuoAbilities()).ToDictionary(a => a.Id);
 
     public static AbilityDef Ability(string id) => AbilityTable[id];
 
@@ -20,20 +20,23 @@ public static partial class Database
         };
         yield return new AbilityDef
         {
-            Id = "shield_bash", Name = "Shield Bash", Melee = true, Power = 5, Cost = 1, Accuracy = 95,
+            Id = "shield_bash", Name = "Shield Bash",
+            UpText = "Also interrupts a charging enemy.", UpInterrupt = true, Melee = true, Power = 5, Cost = 1, Accuracy = 95,
             Requires = RowRequirement.Front,
             Applies = { new StatusApply(StatusKind.Weakened, 0, 2) },
             Description = "5 physical damage and Weakens the target (-25% damage) for 2 turns.",
         };
         yield return new AbilityDef
         {
-            Id = "challenge", Name = "Challenge", Target = TargetKind.Self, Cost = 1, Shield = 8, Cooldown = 2, Vfx = Vfx.Buff,
+            Id = "challenge", Name = "Challenge",
+            UpText = "Also readies a 5-damage Riposte.", UpApplies = { new StatusApply(StatusKind.Riposte, 5, 1, OnSelf: true) }, Target = TargetKind.Self, Cost = 1, Shield = 8, Cooldown = 2, Vfx = Vfx.Buff,
             Applies = { new StatusApply(StatusKind.Taunt, 0, 2, OnSelf: true) },
             Description = "Taunt all enemies for 2 turns and gain an 8-point Shield. Enemy intents retarget to Kael.",
         };
         yield return new AbilityDef
         {
-            Id = "intercept", Name = "Intercept", Target = TargetKind.SingleAlly, Cost = 2, Protect = true, Vfx = Vfx.Buff,
+            Id = "intercept", Name = "Intercept",
+            UpText = "Also cleanses the protected ally.", UpCleanse = true, Target = TargetKind.SingleAlly, Cost = 2, Protect = true, Vfx = Vfx.Buff,
             Applies = { new StatusApply(StatusKind.Defending, 1, 1, OnSelf: true) },
             Description = "Until Kael's next turn, attacks on the chosen ally hit Kael instead, and Kael defends (-50% damage).",
         };
@@ -52,20 +55,23 @@ public static partial class Database
         };
         yield return new AbilityDef
         {
-            Id = "fireball", Name = "Fireball", Element = Element.Fire, Power = 8, Cost = 3, Vfx = Vfx.Projectile,
+            Id = "fireball", Name = "Fireball",
+            UpText = "Also Marks the target for 2 turns.", UpApplies = { new StatusApply(StatusKind.Marked, 0, 2) }, Element = Element.Fire, Power = 8, Cost = 3, Vfx = Vfx.Projectile,
             Applies = { new StatusApply(StatusKind.Burn, 3, 2) },
             Description = "8 fire damage and Burn (3 per turn, 2 turns).",
         };
         yield return new AbilityDef
         {
-            Id = "frost_lance", Name = "Frost Lance", Element = Element.Ice, Power = 6, Cost = 2, Vfx = Vfx.Projectile,
+            Id = "frost_lance", Name = "Frost Lance",
+            UpText = "+1 break pip on a weakness.", UpBreakBonus = 1, Element = Element.Ice, Power = 6, Cost = 2, Vfx = Vfx.Projectile,
             Applies = { new StatusApply(StatusKind.Slowed, 0, 2) },
             Description = "6 ice damage and Slows the target (-3 speed) for 2 turns.",
         };
         yield return new AbilityDef
         {
-            Id = "chain_lightning", Name = "Chain Lightning", Target = TargetKind.AllEnemies, Element = Element.Lightning,
-            Power = 5, Cost = 4, Requires = RowRequirement.Back, Vfx = Vfx.Beam,
+            Id = "chain_lightning", Name = "Chain Lightning",
+            UpText = "Can be cast from either row.", UpAnyRow = true, Target = TargetKind.AllEnemies, Element = Element.Lightning,
+            Power = 5, Cost = 3, Requires = RowRequirement.Back, Vfx = Vfx.Beam,
             Description = "5 lightning damage to every enemy. Must channel from the back row.",
         };
         yield return new AbilityDef
@@ -83,12 +89,14 @@ public static partial class Database
         };
         yield return new AbilityDef
         {
-            Id = "mend", Name = "Mend", Target = TargetKind.SingleAlly, Heal = 12, Cleanse = true, Cost = 2, Vfx = Vfx.Heal,
+            Id = "mend", Name = "Mend",
+            UpText = "Also grants Regen 3 for 2 turns.", UpApplies = { new StatusApply(StatusKind.Regen, 3, 2) }, Target = TargetKind.SingleAlly, Heal = 12, Cleanse = true, Cost = 2, Vfx = Vfx.Heal,
             Description = "Heal an ally for 12 HP and remove their negative effects.",
         };
         yield return new AbilityDef
         {
-            Id = "renewal", Name = "Renewal", Target = TargetKind.AllAllies, Cost = 3, Cooldown = 2, Vfx = Vfx.Heal,
+            Id = "renewal", Name = "Renewal",
+            UpText = "Also cleanses every ally.", UpCleanse = true, Target = TargetKind.AllAllies, Cost = 3, Cooldown = 2, Vfx = Vfx.Heal,
             Applies = { new StatusApply(StatusKind.Regen, 3, 3) },
             Description = "The whole party regenerates 3 HP per turn for 3 turns.",
         };
@@ -99,7 +107,8 @@ public static partial class Database
         };
         yield return new AbilityDef
         {
-            Id = "shepherd", Name = "Shepherd", Target = TargetKind.SingleAlly, Shield = 5, Cost = 1, SwitchTargetRow = true, Vfx = Vfx.Buff,
+            Id = "shepherd", Name = "Shepherd",
+            UpText = "The moved ally is Empowered (+25% damage) for 2 turns.", UpApplies = { new StatusApply(StatusKind.Empowered, 0, 2) }, Target = TargetKind.SingleAlly, Shield = 5, Cost = 1, SwitchTargetRow = true, Vfx = Vfx.Buff,
             Description = "Move an ally to the other row (swapping if the front is full) and give them a 5 Shield.",
         };
 
@@ -111,13 +120,15 @@ public static partial class Database
         };
         yield return new AbilityDef
         {
-            Id = "envenom", Name = "Envenomed Knife", Power = 3, Cost = 1, Accuracy = 95, Vfx = Vfx.Projectile,
+            Id = "envenom", Name = "Envenomed Knife",
+            UpText = "Also Weakens the target for 1 turn.", UpApplies = { new StatusApply(StatusKind.Weakened, 0, 1) }, Power = 3, Cost = 1, Accuracy = 95, Vfx = Vfx.Projectile,
             Applies = { new StatusApply(StatusKind.Poison, 4, 1) },
             Description = "Throw a knife: 3 damage and 4 Poison (stacks; deals its value each turn, then -1).",
         };
         yield return new AbilityDef
         {
-            Id = "hemorrhage", Name = "Hemorrhage", Melee = true, Power = 5, Cost = 2, Accuracy = 95,
+            Id = "hemorrhage", Name = "Hemorrhage",
+            UpText = "Also Marks the target for 2 turns.", UpApplies = { new StatusApply(StatusKind.Marked, 0, 2) }, Melee = true, Power = 5, Cost = 2, Accuracy = 95,
             Applies = { new StatusApply(StatusKind.Bleed, 3, 3) },
             Description = "5 damage and Bleed (3 per turn for 3 turns, ignores armor and shields).",
         };
@@ -142,24 +153,28 @@ public static partial class Database
         };
         yield return new AbilityDef
         {
-            Id = "hunters_mark", Name = "Hunter's Mark", Cost = 1, Power = 0, Vfx = Vfx.Debuff,
+            Id = "hunters_mark", Name = "Hunter's Mark",
+            UpText = "Also Slows the target for 1 turn.", UpApplies = { new StatusApply(StatusKind.Slowed, 0, 1) }, Cost = 1, Power = 0, Vfx = Vfx.Debuff,
             Applies = { new StatusApply(StatusKind.Marked, 0, 3) },
             Description = "Mark an enemy for 3 turns: it takes +25% damage, and attacks against it get +20% crit and +10% accuracy.",
         };
         yield return new AbilityDef
         {
-            Id = "piercing_shot", Name = "Piercing Shot", Power = 9, Cost = 2, IgnoresArmor = true, Accuracy = 100, Vfx = Vfx.Arrow,
+            Id = "piercing_shot", Name = "Piercing Shot",
+            UpText = "Also interrupts a charging enemy.", UpInterrupt = true, Power = 9, Cost = 2, IgnoresArmor = true, Accuracy = 100, Vfx = Vfx.Arrow,
             Description = "9 damage that ignores armor.",
         };
         yield return new AbilityDef
         {
-            Id = "volley", Name = "Volley", Target = TargetKind.AllEnemies, Power = 4, Cost = 3, Requires = RowRequirement.Back,
+            Id = "volley", Name = "Volley",
+            UpText = "Can be fired from either row.", UpAnyRow = true, Target = TargetKind.AllEnemies, Power = 4, Cost = 3, Requires = RowRequirement.Back,
             Accuracy = 90, Vfx = Vfx.Arrow,
             Description = "4 damage to every enemy. Needs room to aim: back row only.",
         };
         yield return new AbilityDef
         {
-            Id = "storm_arrow", Name = "Storm Arrow", Element = Element.Lightning, Power = 6, Cost = 2, Cooldown = 2, Accuracy = 100,
+            Id = "storm_arrow", Name = "Storm Arrow",
+            UpText = "+1 break pip on a weakness.", UpBreakBonus = 1, Element = Element.Lightning, Power = 6, Cost = 2, Cooldown = 2, Accuracy = 100,
             Vfx = Vfx.Arrow,
             Description = "6 lightning damage. Tumble to the other row afterwards.",
             SwitchSelfRow = true,
@@ -173,17 +188,20 @@ public static partial class Database
         };
         yield return new AbilityDef
         {
-            Id = "reckless_swing", Name = "Reckless Swing", Melee = true, Power = 13, Cost = 1, SelfDamage = 4, Accuracy = 90,
+            Id = "reckless_swing", Name = "Reckless Swing",
+            UpText = "+1 break pip on a weakness.", UpBreakBonus = 1, Melee = true, Power = 13, Cost = 1, SelfDamage = 4, Accuracy = 90,
             Description = "Throw caution away: a huge blow that also hurts Brakka.",
         };
         yield return new AbilityDef
         {
-            Id = "bloodthirst", Name = "Bloodthirst", Melee = true, Power = 8, Cost = 2, LifestealPct = 60, Accuracy = 95,
-            Description = "A savage bite of the axe. Heals Brakka for 60% of the damage.",
+            Id = "bloodthirst", Name = "Bloodthirst",
+            UpText = "Also Weakens the target for 1 turn.", UpApplies = { new StatusApply(StatusKind.Weakened, 0, 1) }, Melee = true, Power = 10, Cost = 1, LifestealPct = 50, Accuracy = 95,
+            Description = "A savage bite of the axe. Heals Brakka for 50% of the damage. The safe alternative to Reckless Swing.",
         };
         yield return new AbilityDef
         {
-            Id = "whirlwind", Name = "Whirlwind", Target = TargetKind.AllEnemies, Power = 5, Cost = 3, Cooldown = 2,
+            Id = "whirlwind", Name = "Whirlwind",
+            UpText = "Ignores armor.", UpIgnoresArmor = true, Target = TargetKind.AllEnemies, Power = 9, Cost = 2, Cooldown = 2,
             Accuracy = 90, Vfx = Vfx.Melee,
             Description = "Spin through the enemy line, hitting every enemy.",
         };
@@ -203,21 +221,24 @@ public static partial class Database
         };
         yield return new AbilityDef
         {
-            Id = "curse_frailty", Name = "Curse of Frailty", Cost = 1, Accuracy = 100, Vfx = Vfx.Debuff,
+            Id = "curse_frailty", Name = "Curse of Frailty",
+            UpText = "Also Slows the target for 2 turns.", UpApplies = { new StatusApply(StatusKind.Slowed, 0, 2) }, Cost = 1, Accuracy = 100, Vfx = Vfx.Debuff,
             Applies = { new StatusApply(StatusKind.Marked, 0, 2), new StatusApply(StatusKind.Weakened, 0, 2) },
             Description = "Marks and Weakens an enemy for 2 turns.",
         };
         yield return new AbilityDef
         {
-            Id = "creeping_doom", Name = "Creeping Doom", Cost = 2, Accuracy = 100, Vfx = Vfx.Cloud,
+            Id = "creeping_doom", Name = "Creeping Doom",
+            UpText = "Also Burns the target (2 for 2 turns).", UpApplies = { new StatusApply(StatusKind.Burn, 2, 2) }, Cost = 2, Accuracy = 100, Vfx = Vfx.Cloud,
             Applies = { new StatusApply(StatusKind.Poison, 5, 3), new StatusApply(StatusKind.Slowed, 0, 2) },
             Description = "Poison 5 and Slow an enemy.",
         };
         yield return new AbilityDef
         {
-            Id = "torment", Name = "Torment", Power = 3, PowerPerDebuff = 5, Cost = 2, IgnoresArmor = true, Accuracy = 100,
+            Id = "torment", Name = "Torment",
+            UpText = "Also interrupts a charging enemy.", UpInterrupt = true, Power = 3, PowerPerDebuff = 4, Cost = 2, IgnoresArmor = true, Accuracy = 100,
             Vfx = Vfx.Beam,
-            Description = "3 damage, +5 for every affliction on the target. Ignores armor.",
+            Description = "3 damage, +4 for every affliction on the target. Ignores armor.",
         };
         yield return new AbilityDef
         {
@@ -287,7 +308,7 @@ public static partial class Database
             Resource = new ResourceDef("Hex", "#c070ff", 5, 2, 1),
             BasicAbility = "hexbolt", Abilities = ["curse_frailty", "creeping_doom", "torment", "siphon_soul"],
         },
-    };
+    }.Concat(HeroesPack2).ToList();
 
     public static HeroDef Hero(string id) => Heroes.FirstOrDefault(h => h.Id == id) ?? Heroes[0];
 
@@ -299,7 +320,7 @@ public static partial class Database
         {
             DefId = def.Id,
             Name = def.Name,
-            Sprite = def.Id,
+            Sprite = state.Sprite,
             IsHero = true,
             Hero = def,
             ResourceDef = def.Resource,
@@ -318,9 +339,10 @@ public static partial class Database
         unit.MaxResource = def.Resource.Max;
         unit.Resource = System.Math.Min(def.Resource.Max, def.Resource.Start + stats.StartResource);
         unit.Basic = new AbilityInstance(Ability(def.BasicAbility), state.Upgrades.Contains(def.BasicAbility));
-        foreach (var id in def.Abilities)
+        foreach (var id in state.AbilityIds)
             unit.Abilities.Add(new AbilityInstance(Ability(id), state.Upgrades.Contains(id)));
         foreach (var id in state.Traits) unit.Traits.Add(id);
+        if (state.Weapon is { } weapon && HasItem(weapon)) unit.WeaponEffect = Item(weapon).WeaponEffect;
         return unit;
     }
 }

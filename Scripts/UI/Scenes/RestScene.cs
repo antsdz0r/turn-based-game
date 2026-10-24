@@ -13,7 +13,7 @@ public partial class RestScene : Screen
     protected override void Build()
     {
         var run = GameSession.Run ?? GameSession.EnsureRun();
-        Audio.Music(this, "menu");
+        Audio.Music(this, "camp");   // lo-fi by the campfire
         if (GameSession.Run is { } regionRun) AddRegionBackdrop(regionRun.NodeRegion, 0.45f, torches: false); else AddBackdrop(new Color(0.42f, 0.38f, 0.48f), torches: false);
         Glows.Add(Visuals.AddCampfire(this, 0.5f, 0.86f));
 
@@ -21,7 +21,7 @@ public partial class RestScene : Screen
         float[] seats = [-250f, -150f, 170f];
         for (int i = 0; i < run.Party.Count && i < seats.Length; i++)
         {
-            var sprite = Visuals.UnitSprite(run.Party[i].Id, 2f, flip: seats[i] > 0);
+            var sprite = Visuals.UnitSprite(run.Party[i].Sprite, 2f, flip: seats[i] > 0);
             sprite.Position = new Vector2(seats[i], 0);
             fire.AddChild(sprite);
         }

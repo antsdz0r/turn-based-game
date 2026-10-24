@@ -75,7 +75,9 @@ public partial class ShopScene : Screen
             {
                 var item = Database.Item(entry.Id);
                 name = item.Name;
-                desc = $"{item.Kind}: {item.Description}";
+                desc = item.IsEquipment
+                    ? $"[color={Visuals.RarityHex(item)}]{item.Rarity}[/color] {item.Family ?? item.Kind.ToString()}: {item.Description}\n[color=#7d7590]{run.EquippedSummary(item)}[/color]"
+                    : $"{item.Kind}: {item.Description}";
                 icon = Visuals.ItemIcon(item);
             }
             var image = Visuals.Icon(icon, 32);

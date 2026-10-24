@@ -18,6 +18,12 @@ public sealed class BattleSetup
     public int Heat { get; init; }
     /// <summary>Daily challenge modifier id, or null.</summary>
     public string? Daily { get; init; }
+    /// <summary>Battlefield condition for this fight (see Omens), or null.</summary>
+    public string? Omen { get; init; }
+    /// <summary>Optional objective for this fight (see Bounties), or null.</summary>
+    public string? Bounty { get; init; }
+    /// <summary>Weekly challenge mutators that the battle rules read (frenzy, ironclad, war drums).</summary>
+    public HashSet<string> Mutators { get; init; } = new();
 }
 
 /// <summary>
@@ -35,6 +41,15 @@ public sealed partial class Battle
 {
     public const int MaxEnemies = 4;
     public const int MaxFrontRow = 2;
+    /// <summary>A perfect parry's counterattack: this many times the parrying hero's basic attack power.</summary>
+    public const double ParryCounterMult = 1.5;
+
+    /// <summary>
+    /// How many beats the parry prompt has for an attack (Clair Obscur style: every beat must be timed):
+    /// 2 for ordinary attacks, 3 for elites, bosses, multi-hit and charged attacks.
+    /// </summary>
+    public static int ParryBeats(Combatant enemy, EnemyMoveDef move) =>
+        enemy.IsBoss || enemy.IsElite || move.Hits >= 2 || move.Charged ? 3 : 2;
 
     private readonly List<Combatant> _heroes;
     private readonly List<Combatant> _enemies;
@@ -42,6 +57,7 @@ public sealed partial class Battle
     private readonly Random _rng;
 
     public HashSet<string> Relics { get; }
+    public HashSet<string> Mutators { get; }
     public List<string> Consumables { get; }
     public int Floor { get; }
     public int Heat { get; }
@@ -69,11 +85,15 @@ public sealed partial class Battle
         EnemyPowerMult = (1 + 0.028 * setup.Floor + (Heat >= 2 ? 0.10 : 0)) * 1.15;
         _rng = new Random(setup.Seed);
         Daily = setup.Daily;
-        if (Daily == "frenzy")
+        Omen = setup.Omen;
+        Bounty = setup.Bounty;
+        Mutators = setup.Mutators;
+        if (Daily == "frenzy" || Mutators.Contains("frenzy"))
         {
             EnemyPowerMult *= 1.3;
             foreach (var e in _enemies) e.MaxHp = e.Hp = Math.Max(1, (int)Math.Round(e.MaxHp * 0.7));
         }
+        if (Relics.Contains("thorn_pact")) foreach (var h in _heroes) h.Armor = Math.Max(0, h.Armor - 2);
         NormalizeSlots(_heroes);
         NormalizeSlots(_enemies);
     }
@@ -112,6 +132,11 @@ public sealed partial class Battle
         if (Heat >= 5)
             foreach (var enemy in AliveEnemies) AddShield(enemy, 5, 2);
         foreach (var enemy in AliveEnemies.Where(e => e.Modifier == "armored")) AddShield(enemy, 10, 3);
+        if (HasRelic("hollow_lantern"))
+            foreach (var hero in AliveHeroes) hero.Hp = Math.Max(1, Math.Min(hero.Hp, hero.MaxHp * 4 / 5));
+        if (Mutators.Contains("ironclad")) foreach (var enemy in AliveEnemies) AddShield(enemy, 6, 2);
+        if (Mutators.Contains("war_drums"))
+            foreach (var enemy in AliveEnemies) ApplyStatus(enemy, new StatusApply(StatusKind.Empowered, 0, 2), enemy.Uid);
         foreach (var hero in AliveHeroes.Where(h => HasTrait(h, "brakka_warcry")))
             ApplyStatus(hero, new StatusApply(StatusKind.Empowered, 0, 2), hero.Uid);
         if (HasRelic("childs_lantern"))
@@ -149,6 +174,8 @@ public sealed partial class Battle
                 actor.Remove(StatusKind.Stun);
                 Emit(new TextEvent(actor, "Stunned", "#ffd76b"));
                 Log($"{Name(actor)} is stunned and loses the turn.");
+                // No stun-locks: after losing a turn, a unit shrugs off new stuns until the end of next round.
+                _steadfastUntil[actor.Uid] = Round + 1;
                 actor.Intent = null;
                 EndTurn(actor);
                 continue;
@@ -190,14 +217,30 @@ public sealed partial class Battle
         Log($"[color=#8fb3ff]— Round {Round} —[/color]");
 
         // Bone Colossus: its core shifts and exposes a new weak point every round.
-        foreach (var boss in AliveEnemies.Where(e => e.Enemy?.ShiftingWeakPoint == true))
+        foreach (var boss in AliveEnemies.Where(e => e.Enemy is { } d && (d.ShiftingWeakPoint || (d.Phase2ShiftingWeakPoint && e.Phase >= 2))))
         {
+            // Phase 2 escalation: its cracked shell exposes TWO weak points, but it attacks harder.
             var options = new[] { Element.Physical, Element.Fire, Element.Ice, Element.Lightning }
-                .Where(el => el != boss.ExposedElement && boss.AffinityTo(el) != Affinity.Immune).ToList();
-            boss.ExposedElement = options[_rng.Next(options.Count)];
-            Emit(new TextEvent(boss, $"Weak point: {boss.ExposedElement}!", "#ffd76b"));
-            Log($"  [color=#ffd76b]{boss.Name}'s core shifts: it is exposed to {boss.ExposedElement}![/color]");
+                .Where(el => el != boss.ExposedElement && boss.AffinityTo(el) != Affinity.Immune)
+                .OrderBy(_ => _rng.Next()).ToList();
+            boss.ExposedElement = options[0];
+            boss.ExposedElement2 = boss.Enemy!.ShiftingWeakPoint && boss.Phase >= 2 && options.Count > 1 ? options[1] : null;
+            string exposedText = boss.ExposedElement2 is { } second ? $"{boss.ExposedElement} and {second}" : $"{boss.ExposedElement}";
+            Emit(new TextEvent(boss, $"Weak point: {exposedText}!", "#ffd76b"));
+            Log($"  [color=#ffd76b]{boss.Name}'s core shifts: it is exposed to {exposedText}![/color]");
             Emit(new IntentsChangedEvent());
+        }
+
+        OmenRoundStart();
+        RegionRoundStart();
+        if (HasRelic("doom_clock") && Round >= 7)
+        {
+            Log("  [color=#d8d6e6]The Doom Clock strikes.[/color]");
+            foreach (var hero in AliveHeroes.ToList())
+            {
+                Emit(new TextEvent(hero, "Doom!", "#d8d6e6"));
+                DotDamage(hero, StatusKind.Bleed, 4, useShield: true);
+            }
         }
 
         // Storm Crown: every third round, lightning strikes every enemy.
@@ -225,7 +268,8 @@ public sealed partial class Battle
         if (actor.IsHero && actor.ResourceDef is not null)
             GainResource(actor, actor.ResourceDef.RegenPerTurn
                                 + (HasTrait(actor, "orrin_focus") ? 1 : 0) + (HasTrait(actor, "maela_devotion") ? 1 : 0)
-                                + (HasTrait(actor, "sable_harvest") ? 1 : 0));
+                                + (HasTrait(actor, "sable_harvest") ? 1 : 0) + (HasTrait(actor, "corvin_brewmaster") ? 1 : 0)
+                                + (HasTrait(actor, "isolde_attune") ? 1 : 0));
     }
 
     private void EndTurn(Combatant actor)
@@ -247,8 +291,15 @@ public sealed partial class Battle
         if (actor.Broken && !actor.Has(StatusKind.Stun))
         {
             actor.Broken = false;
+            actor.TimesBroken++;
+            // Bosses steel themselves: each break makes the next one take one more pip (up to +2).
+            if (actor.IsBoss && actor.TimesBroken <= MaxBossHardening)
+            {
+                actor.BreakMax++;
+                Log($"  [color=#c9bfae]{actor.Name} steels itself: its break meter grows to {actor.BreakMax}.[/color]");
+            }
             actor.Break = actor.BreakMax;
-            Emit(new TextEvent(actor, "Recovered", "#c9bfae"));
+            Emit(new TextEvent(actor, actor.IsBoss && actor.TimesBroken <= MaxBossHardening ? "Steeled (+1 break pip)" : "Recovered", "#c9bfae"));
         }
 
         Current = null;
@@ -287,10 +338,11 @@ public sealed partial class Battle
         var def = ability.Def;
         if (!IsHeroTurn(hero)) { reason = "Not this hero's turn."; return false; }
         if (ability.CooldownLeft > 0) { reason = $"Ready in {ability.CooldownLeft} turn(s)."; return false; }
-        if (def.Cost > hero.Resource) { reason = $"Needs {def.Cost} {hero.ResourceDef?.Name}."; return false; }
+        if (EffectiveCost(hero, def) > hero.Resource) { reason = $"Needs {EffectiveCost(hero, def)} {hero.ResourceDef?.Name}."; return false; }
         if (def.MinResource > hero.Resource) { reason = $"Needs at least {def.MinResource} {hero.ResourceDef?.Name}."; return false; }
-        if (def.Requires == RowRequirement.Front && hero.Row != Row.Front) { reason = "Must be in the FRONT row."; return false; }
-        if (def.Requires == RowRequirement.Back && hero.Row != Row.Back) { reason = "Must be in the BACK row."; return false; }
+        var requires = def.EffectiveRequires(ability.Upgraded);
+        if (requires == RowRequirement.Front && hero.Row != Row.Front) { reason = "Must be in the FRONT row."; return false; }
+        if (requires == RowRequirement.Back && hero.Row != Row.Back) { reason = "Must be in the BACK row."; return false; }
         if (def.Target is TargetKind.SingleEnemy or TargetKind.SingleAlly or TargetKind.AllEnemies && ValidTargets(hero, ability).Count == 0)
         { reason = "No valid target."; return false; }
         return true;
@@ -301,7 +353,8 @@ public sealed partial class Battle
         var def = ability.Def;
         return def.Target switch
         {
-            TargetKind.SingleEnemy or TargetKind.AllEnemies => TargetableEnemies(def.Melee).ToList(),
+            // Warden's Pike: melee attacks reach past the front row.
+            TargetKind.SingleEnemy or TargetKind.AllEnemies => TargetableEnemies(def.Melee && !HasWeapon(hero, "reach")).ToList(),
             TargetKind.SingleAlly => AliveHeroes.Where(h => !def.Protect || h != hero).ToList(),
             TargetKind.AllAllies => AliveHeroes.ToList(),
             _ => new List<Combatant> { hero },
@@ -323,7 +376,7 @@ public sealed partial class Battle
         return alive;
     }
 
-    public bool UseAbility(Combatant hero, AbilityInstance ability, Combatant? target)
+    private bool UseAbilityCore(Combatant hero, AbilityInstance ability, Combatant? target)
     {
         if (!CanUse(hero, ability, out _)) return false;
         var def = ability.Def;
@@ -338,12 +391,13 @@ public sealed partial class Battle
             spent = hero.Resource;
             hero.Resource = 0;
         }
-        else hero.Resource -= def.Cost;
+        else hero.Resource -= EffectiveCost(hero, def);
         if (def.Cooldown > 0) ability.CooldownLeft = def.EffectiveCooldown(up) + 1;
-        if (def.SelfDamage > 0)
+        int selfDamage = def.SelfDamage + (def.Cost > 0 && HasWeapon(hero, "blood_price") ? 2 : 0);
+        if (selfDamage > 0)
         {
-            hero.Hp = Math.Max(1, hero.Hp - def.SelfDamage);
-            Emit(new TickEvent(hero, StatusKind.Bleed, def.SelfDamage, hero.Hp));
+            hero.Hp = Math.Max(1, hero.Hp - selfDamage);
+            Emit(new TickEvent(hero, StatusKind.Bleed, selfDamage, hero.Hp));
         }
         int dealtBefore = DamageDealt;
 
@@ -355,7 +409,8 @@ public sealed partial class Battle
         };
 
         bool big = def.Cost >= 3 || (def.PowerPerResource > 0 && hero.Resource + def.Cost >= 4);
-        Emit(new ActionEvent(hero, ability.DisplayName, def.Vfx, def.Element, targets, big));
+        bool finisher = (def.PowerPerResource > 0 && spent >= 4) || def.Id.StartsWith("duo_") || def.Id is "meteor" or "trinity_cut" or "prismatic";
+        Emit(new ActionEvent(hero, ability.DisplayName, def.Vfx, def.Element, targets, big, finisher));
         Log($"[color=#8fd18f]{hero.Name}[/color] uses [b]{ability.DisplayName}[/b].");
         if (def.Cost >= 3 && HasTrait(hero, "orrin_echo") && _rng.Next(100) < 30)
         {
@@ -371,15 +426,15 @@ public sealed partial class Battle
             {
                 landed = false;
                 int power = AbilityPower(hero, def, up, t, spent);
-                for (int i = 0; i < def.HitCount && t.IsAlive; i++)
+                for (int i = 0; i < HitsFor(hero, def) && t.IsAlive; i++)
                 {
-                    var hit = Strike(hero, t, power, def.HitElement(i), def.Accuracy, def.CritBonus, def.IgnoresArmor,
-                                     def.Melee, def.BreakBonus, DefenseQuality.None);
+                    var hit = Strike(hero, t, power, def.HitElement(i), def.Accuracy, def.CritBonus, def.EffectiveIgnoresArmor(up),
+                                     def.Melee, def.EffectiveBreakBonus(up), DefenseQuality.None);
                     if (hit is not null) landed = true;
                 }
             }
 
-            if (def.Interrupt && landed && t.IsAlive && (t.ChargedMove is not null || t.Intent is { Charging: true }))
+            if (def.EffectiveInterrupt(up) && landed && t.IsAlive && (t.ChargedMove is not null || t.Intent is { Charging: true }))
             {
                 t.ChargedMove = null;
                 t.Intent = null;
@@ -397,10 +452,10 @@ public sealed partial class Battle
                     if (HasTrait(hero, "nyx_venom")) ApplyStatus(t, new StatusApply(StatusKind.Poison, 2, 3), hero.Uid);
                 }
             }
-            if (def.Heal > 0) HealUnit(t, def.EffectiveHeal(up), fromHero: true);
+            if (def.Heal > 0) HealUnit(t, (int)Math.Round(def.EffectiveHeal(up) * (HasTrait(hero, "corvin_medic") ? 1.3 : 1.0)), fromHero: true);
             if (def.Shield > 0)
                 AddShield(t, (int)Math.Round(def.EffectiveShield(up) * (HasTrait(hero, "maela_ward") ? 1.5 : 1.0)), 2);
-            if (def.Cleanse) Cleanse(t);
+            if (def.EffectiveCleanse(up)) Cleanse(t);
             if (def.SwitchTargetRow && t.IsAlive) SwitchRow(t);
             if (def.Protect && t.IsAlive && t != hero)
             {
@@ -408,8 +463,23 @@ public sealed partial class Battle
                 t.Statuses.Add(new StatusEffect { Kind = StatusKind.Guarded, Amount = 1, Turns = 1, SourceUid = hero.Uid });
                 Emit(new StatusEvent(t, StatusKind.Guarded, true));
                 Log($"  {hero.Name} shields {t.Name} with their body.");
+                if (HasWeapon(hero, "oathkeeper")) ReadyRiposte(hero);
             }
         }
+
+        // Gravewheat Scythe: the basic attack sweeps through to a second enemy at half power.
+        if (def.IsBasic && def.Target == TargetKind.SingleEnemy && def.Power > 0 && HasWeapon(hero, "reap") && hero.IsAlive
+            && AliveEnemies.Where(e => !targets.Contains(e)).OrderBy(e => e.Row).ThenBy(e => e.Slot).FirstOrDefault() is { } swept)
+        {
+            Emit(new TextEvent(swept, "Reap!", "#d0c0a0"));
+            Strike(hero, swept, Math.Max(1, AbilityPower(hero, def, up, swept, spent) / 2), def.HitElement(0), def.Accuracy, def.CritBonus,
+                   def.EffectiveIgnoresArmor(up), false, 0, DefenseQuality.None);
+        }
+
+        // Vigil Lantern: damage from abilities mends the most wounded ally for 20% of it.
+        if (!def.IsBasic && HasWeapon(hero, "lantern") && DamageDealt - dealtBefore > 0
+            && AliveHeroes.OrderBy(h => h.Hp * 100 / Math.Max(1, h.MaxHp)).FirstOrDefault() is { } wounded)
+            HealUnit(wounded, Math.Max(1, (DamageDealt - dealtBefore) * 20 / 100), fromHero: true);
 
         // Lifesteal (Bloodthirst, Siphon Soul, Brakka's Bloodbath)
         int steal = def.LifestealPct + (def.Power > 0 && def.TargetsEnemies && HasTrait(hero, "brakka_bloodbath") ? 15 : 0);
@@ -432,14 +502,27 @@ public sealed partial class Battle
 
     public bool CanDefend(Combatant hero) => IsHeroTurn(hero);
 
-    public bool Defend(Combatant hero)
+    private bool DefendCore(Combatant hero)
     {
         if (!CanDefend(hero)) return false;
         Emit(new ActionEvent(hero, "Defend", Vfx.Buff, Element.Physical, new List<Combatant> { hero }));
         Log($"[color=#8fd18f]{hero.Name}[/color] takes a defensive stance.");
         ApplyStatus(hero, new StatusApply(StatusKind.Defending, 1, 1), hero.Uid);
-        if (HasTrait(hero, "kael_ironwall")) AddShield(hero, 6, 1);
+        if (HasTrait(hero, "kael_ironwall") || HasTrait(hero, "isolde_bladeward")) AddShield(hero, 6, 1);
         GainResource(hero, 1);
+        // Defending also shakes off the worst lingering affliction (never Stun or a Mark/brand).
+        if (hero.Statuses.Where(s => s.Kind is StatusKind.Bleed or StatusKind.Burn or StatusKind.Poison
+                                     or StatusKind.Weakened or StatusKind.Slowed)
+                .OrderBy(s => s.Kind switch { StatusKind.Bleed => 0, StatusKind.Burn => 1, StatusKind.Poison => 2, StatusKind.Weakened => 3, _ => 4 })
+                .FirstOrDefault() is { } affliction)
+        {
+            RemoveStatus(hero, affliction);
+            Emit(new TextEvent(hero, $"Shakes off {affliction.Kind}", "#bfeaff"));
+            Log($"  {hero.Name} shakes off {affliction.Kind}.");
+        }
+        if (HasWeapon(hero, "oathkeeper")) ReadyRiposte(hero);
+        if (HasRelic("sentinels_oath") && AliveHeroes.Where(h => h != hero).OrderBy(h => h.HealthPct).FirstOrDefault() is { } ward)
+            AddShield(ward, 6, 2);
         FinishHeroAction(hero);
         return true;
     }
@@ -453,7 +536,7 @@ public sealed partial class Battle
     }
 
     /// <summary>Switch rows. If the front row is full, swap places with a front-row ally.</summary>
-    public bool Move(Combatant hero)
+    private bool MoveCore(Combatant hero)
     {
         if (!CanMove(hero, out _)) return false;
         Emit(new ActionEvent(hero, hero.Row == Row.Front ? "Fall back" : "Advance", Vfx.Buff, Element.Physical, new List<Combatant> { hero }));
@@ -476,15 +559,16 @@ public sealed partial class Battle
     {
         if (item.ReviveHpPct > 0) return _heroes.Where(h => !h.IsAlive).ToList();
         if (item.TargetsAlly) return AliveHeroes.ToList();
+        if (item.TargetsEnemy) return AliveEnemies.ToList();
         return new List<Combatant>();
     }
 
-    public bool UseItem(Combatant hero, int index, Combatant? target)
+    private bool UseItemCore(Combatant hero, int index, Combatant? target)
     {
         if (!CanUseItem(hero, index, out _)) return false;
         var item = Database.Item(Consumables[index]);
         var targets = ItemTargets(item);
-        if (item.TargetsAlly && (target is null || !targets.Contains(target))) return false;
+        if (item.NeedsTarget && (target is null || !targets.Contains(target))) return false;
 
         if (HasRelic("alchemist_kit") && !_freeItemUsed)
         {
@@ -499,7 +583,39 @@ public sealed partial class Battle
             var enemies = AliveEnemies.ToList();
             Emit(new ActionEvent(hero, item.Name, Vfx.Projectile, item.DamageElement, enemies));
             foreach (var e in enemies)
+            {
                 Strike(hero, e, item.DamageAll, item.DamageElement, 0, 0, false, false, 0, DefenseQuality.None);
+                if (item.BreakAll > 0 && e.IsAlive) ChipBreak(e, item.BreakAll);
+            }
+        }
+        else if (item.TargetsEnemy)
+        {
+            var e = target!;
+            Emit(new ActionEvent(hero, item.Name, Vfx.Projectile, item.DamageElement, new List<Combatant> { e }));
+            Strike(hero, e, 4, item.DamageElement, 0, 0, false, false, 0, DefenseQuality.None);
+            if (e.IsAlive && e.IsCharging)
+            {
+                if (e.IsBoss)
+                {
+                    Emit(new TextEvent(e, "Staggered!", "#ffb85a"));
+                    Log($"  {e.Name} is too mighty to interrupt, but staggers.");
+                    ChipBreak(e, 2);
+                }
+                else
+                {
+                    e.ChargedMove = null;
+                    e.Intent = null;
+                    Emit(new TextEvent(e, "Interrupted!", "#ffa040"));
+                    Log($"  {e.Name}'s attack is interrupted!");
+                    Emit(new IntentsChangedEvent());
+                }
+            }
+        }
+        else if (item.ShieldAll > 0)
+        {
+            var allies = AliveHeroes.ToList();
+            Emit(new ActionEvent(hero, item.Name, Vfx.Buff, Element.Physical, allies));
+            foreach (var ally in allies) AddShield(ally, item.ShieldAll, 2);
         }
         else
         {
@@ -559,7 +675,7 @@ public sealed partial class Battle
     public IReadOnlyList<Combatant> PendingAttackTargets =>
         Current?.Intent is { } intent ? IntentTargets(Current, intent) : new List<Combatant>();
 
-    public void ExecuteEnemyTurn(DefenseQuality defense)
+    private void ExecuteEnemyTurnCore(DefenseQuality defense)
     {
         if (State != BattleState.EnemyTurn || Current is null) return;
         var enemy = Current;
@@ -599,6 +715,9 @@ public sealed partial class Battle
         Emit(new ActionEvent(enemy, move.Name, move.Vfx, move.Element, targets, big));
         Log($"[color=#ff9b9b]{enemy.Name}[/color] uses [b]{move.Name}[/b]!");
 
+        if (move.Target == MoveTarget.Branded && targets.Count == 0)
+            Log("  ...but no one bears the brand. The lightning strikes empty stone.");
+
         switch (move.Kind)
         {
             case MoveKind.Attack:
@@ -609,12 +728,21 @@ public sealed partial class Battle
                         if (!t.IsAlive) continue;
                         var hit = Strike(enemy, t, ScaledPower(move.Power, enemy), move.Element, move.Accuracy, 0, false,
                                          move.Melee, 0, defense);
-                        if (hit is not null && hit.IsAlive)
+                        // A perfect parry also deflects the attack's afflictions.
+                        if (hit is not null && hit.IsAlive && defense != DefenseQuality.Perfect)
                             foreach (var apply in move.Applies.Where(a => !a.OnSelf))
                                 ApplyStatus(hit, apply, enemy.Uid);
                         if (!enemy.IsAlive) break; // killed by a riposte
                     }
                     if (!enemy.IsAlive || !AliveHeroes.Any()) break;
+                }
+                // Perfect parry: the defending hero counterattacks (like a riposte, but anyone can do it).
+                if (defense == DefenseQuality.Perfect && enemy.IsAlive && targets.FirstOrDefault(t => t.IsHero && t.IsAlive) is { } parrier)
+                {
+                    int counter = (int)Math.Round((parrier.Basic?.Def.EffectivePower(parrier.Basic.Upgraded) ?? 6) * ParryCounterMult);
+                    Emit(new TextEvent(parrier, "Counter!", "#8fb3ff"));
+                    Log($"  [color=#8fb3ff]{parrier.Name} parries everything and counterattacks![/color]");
+                    Strike(parrier, enemy, counter, Element.Physical, 0, 0, false, false, 1, DefenseQuality.None);
                 }
                 break;
 
@@ -658,7 +786,7 @@ public sealed partial class Battle
                 // Steal the target's strongest ready ability: it goes on a long cooldown and the King grows stronger.
                 foreach (var t in targets)
                 {
-                    var stolen = t.Abilities.Where(a => a.CooldownLeft == 0).OrderByDescending(a => a.Def.Cost).ThenByDescending(a => a.Def.Power).FirstOrDefault();
+                    var stolen = UsurpTarget(t);
                     if (stolen is null) continue;
                     stolen.CooldownLeft = 3;
                     Emit(new TextEvent(t, $"{stolen.Def.Name} stolen!", "#c070ff"));
@@ -721,7 +849,7 @@ public sealed partial class Battle
         }
         else
         {
-            var move = EnemyAI.ChooseMove(this, enemy, _rng);
+            var move = ApplyTactics(enemy, EnemyAI.ChooseMove(this, enemy, _rng));
             if (move.Kind == MoveKind.Summon && AliveEnemies.Count() >= MaxEnemies)
                 move = enemy.Moves.FirstOrDefault(m => m.Kind == MoveKind.Attack) ?? move;
             if (move.Kind == MoveKind.Consume && !AliveEnemies.Any(e => e != enemy && e.Summoned))
@@ -748,7 +876,7 @@ public sealed partial class Battle
                 HeroPick.Backline => candidates.OrderByDescending(h => h.Row).ThenByDescending(h => h.Slot).First(),
                 HeroPick.Frontline => candidates.OrderBy(h => h.Row).ThenBy(h => h.Slot).First(),
                 HeroPick.Marked => candidates.OrderByDescending(h => h.Has(StatusKind.Marked)).ThenByDescending(h => h.Hp).First(),
-                _ => candidates[_rng.Next(candidates.Count)],
+                _ => Smart(enemy) ? SmartPick(enemy, move, candidates) : candidates[_rng.Next(candidates.Count)],
             };
         }
         if (move.Kind == MoveKind.Consume)
@@ -759,7 +887,10 @@ public sealed partial class Battle
         if (move.Target == MoveTarget.Ally)
         {
             if (current is not null && current.IsAlive) return current;
-            return AliveEnemies.OrderBy(e => e.HealthPct).ThenBy(e => e == enemy ? 1 : 0).FirstOrDefault();
+            // Cover the ally closest to breaking first, then the most wounded.
+            bool shielding = move.Kind is MoveKind.Shield or MoveKind.Defend;
+            return AliveEnemies.OrderBy(e => shielding && !e.Broken && e.Break <= 1 && !e.Has(StatusKind.Shield) ? 0 : 1)
+                .ThenBy(e => e.HealthPct).ThenBy(e => e == enemy ? 1 : 0).FirstOrDefault();
         }
         return null;
     }
@@ -785,11 +916,15 @@ public sealed partial class Battle
                 return front.Count > 0 ? front : heroes;
             case MoveTarget.FrontOnly:
                 return heroes.Where(h => h.Row == Row.Front).ToList();
+            case MoveTarget.BackOnly:
+                return heroes.Where(h => h.Row == Row.Back).ToList();
             case MoveTarget.BackRow:
                 var back = heroes.Where(h => h.Row == Row.Back).ToList();
                 return back.Count > 0 ? back : heroes;
             case MoveTarget.AllHeroes:
                 return heroes;
+            case MoveTarget.Branded:
+                return heroes.Where(h => h.Has(StatusKind.Marked)).ToList();
             case MoveTarget.Self:
                 return new List<Combatant> { enemy };
             case MoveTarget.Ally:

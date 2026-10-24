@@ -19,11 +19,13 @@ public partial class MainMenu : Screen
         AddBackdrop(new Color(0.62f, 0.58f, 0.72f));
 
         var floor = Visuals.AnchorPoint(this, 0.5f, 0.9f);
-        string[] party = ["ranger", "arcanist", "warden", "shadowblade", "vanguard", "hexer", "berserker"];
+        string[] party = ["ranger", "arcanist", "warden", "alchemist", "shadowblade", "vanguard", "spellblade", "hexer", "berserker"];
         for (int i = 0; i < party.Length; i++)
         {
-            var sprite = Visuals.UnitSprite(party[i]);
-            sprite.Position = new Vector2(-600 + i * 62, 0);
+            var prof = GameSession.Profile;
+            bool costume = prof.CostumeOn.Contains(party[i]) && Mastery.HasCostume(prof, party[i]);
+            var sprite = Visuals.UnitSprite(costume ? Mastery.Costume(party[i])!.Sprite : party[i]);
+            sprite.Position = new Vector2(-610 + i * 56, 0);
             if (!Meta.IsHeroUnlocked(GameSession.Profile, party[i])) sprite.Modulate = new Color(0, 0, 0, 0.7f);
             floor.AddChild(sprite);
         }
@@ -69,9 +71,27 @@ public partial class MainMenu : Screen
         int best = GameSession.Profile.DailyBest.GetValueOrDefault(today);
         daily.TooltipText = $"{today}: \"{mod.Name}\" — {mod.Description}\nSame party and route for everyone today. +50% Ember Shards."
                             + (best > 0 ? $"\nYour best today: {(best > DungeonMap.Floors ? "VICTORY" : $"floor {best}")}" : "");
-        _menu.AddChild(daily);
-        _menu.AddChild(Visuals.Button($"Ember Shrine  ({GameSession.Profile.Shards})", () => GameSession.ChangeScene(GetTree(), GameSession.ShrineScene),
-                                      new Vector2(280, 46), 18, "UI/icon_fire.png"));
+        var week = Weekly.ThisWeek;
+        var weekly = Visuals.Button("Weekly", OnWeekly, new Vector2(136, 46), 16, "UI/icon_node_elite.png");
+        int weekBest = GameSession.Profile.WeeklyBest.GetValueOrDefault(week);
+        weekly.TooltipText = $"Weekly challenge {week}: a fixed party (any hero, even locked ones) and three rule twists:\n" +
+                             string.Join("\n", Weekly.MutatorsFor(week).Select(id => $"• {Weekly.Get(id)!.Name}: {Weekly.Get(id)!.Description}")) +
+                             "\n+50% Ember Shards." + (weekBest > 0 ? $"\nYour best this week: {(weekBest > DungeonMap.Floors ? "VICTORY" : $"floor {weekBest}")}" : "");
+        daily.Text = "Daily";
+        daily.CustomMinimumSize = new Vector2(136, 46);
+        var challenges = new HBoxContainer();
+        challenges.AddThemeConstantOverride("separation", 8);
+        challenges.AddChild(daily);
+        challenges.AddChild(weekly);
+        _menu.AddChild(challenges);
+        var meta = new HBoxContainer();
+        meta.AddThemeConstantOverride("separation", 8);
+        meta.AddChild(Visuals.Button($"Shrine ({GameSession.Profile.Shards})", () => GameSession.ChangeScene(GetTree(), GameSession.ShrineScene),
+                                     new Vector2(136, 46), 16, "UI/icon_fire.png"));
+        var heroes = Visuals.Button("Heroes", () => GameSession.ChangeScene(GetTree(), GameSession.MasteryScene), new Vector2(136, 46), 16, "UI/icon_empowered.png");
+        heroes.TooltipText = "Hero mastery: costumes, alternative abilities and mastery levels.";
+        meta.AddChild(heroes);
+        _menu.AddChild(meta);
         var extras = new HBoxContainer();
         extras.AddThemeConstantOverride("separation", 8);
         extras.AddChild(Visuals.Button("How to Play", () => GameSession.ChangeScene(GetTree(), GameSession.HowToPlayScene), new Vector2(136, 46), 16));
@@ -121,6 +141,7 @@ public partial class MainMenu : Screen
         {
             GameSession.Profile.RecordRunEnd(old, won: false);
             GameSession.SaveProfile();
+            GameSession.RefreshUnlocks();
             GameSession.DeleteRun();
         }
         GameSession.ChangeScene(GetTree(), GameSession.HeroSelectScene);
@@ -141,9 +162,31 @@ public partial class MainMenu : Screen
         {
             GameSession.Profile.RecordRunEnd(old, won: false);
             GameSession.SaveProfile();
+            GameSession.RefreshUnlocks();
             GameSession.DeleteRun();
         }
         GameSession.StartDaily(GetTree());
+    }
+
+    private bool _confirmWeekly;
+
+    private void OnWeekly()
+    {
+        if (GameSession.HasSavedRun && !_confirmWeekly)
+        {
+            _confirmWeekly = true;
+            Audio.Sfx(this, "blip");
+            if (_newRun is not null) _newRun.Text = "Press Weekly again to abandon your run";
+            return;
+        }
+        if (GameSession.LoadRunFile() is { } old)
+        {
+            GameSession.Profile.RecordRunEnd(old, won: false);
+            GameSession.SaveProfile();
+            GameSession.RefreshUnlocks();
+            GameSession.DeleteRun();
+        }
+        GameSession.StartWeekly(GetTree());
     }
 
     private void OpenSettings()

@@ -83,6 +83,35 @@ public static class Audio
         player.Play();
     }
 
+    private static readonly List<AudioStreamPlayer> VoicePlayers = new();
+    private static int _nextSpeaker;
+
+    /// <summary>Plays a monster voice clip: res://Audio/Voice/{clip}.ogg (two dedicated channels, so sounds never cut it off).</summary>
+    public static void Voice(Node from, string clip, float volume = 1f, float pitch = 1f)
+    {
+        EnsureHost(from);
+        if (_host is null || !GodotObject.IsInstanceValid(_host)) return;
+        if (VoicePlayers.Count == 0 || !GodotObject.IsInstanceValid(VoicePlayers[0]))
+        {
+            VoicePlayers.Clear();
+            for (int i = 0; i < 2; i++)
+            {
+                var p = new AudioStreamPlayer();
+                _host.AddChild(p);
+                VoicePlayers.Add(p);
+            }
+        }
+        var stream = Load($"res://Audio/Voice/{clip}.ogg");
+        if (stream is null) return;
+        if (stream is AudioStreamOggVorbis ogg) ogg.Loop = false;
+        var player = VoicePlayers[_nextSpeaker++ % VoicePlayers.Count];
+        if (!player.IsInsideTree()) return;
+        player.Stream = stream;
+        player.PitchScale = pitch;
+        player.VolumeDb = ToDb(GameSession.Settings.Sfx * volume);
+        player.Play();
+    }
+
     public static void ApplyVolumes()
     {
         if (_music is not null && GodotObject.IsInstanceValid(_music))

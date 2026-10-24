@@ -7,7 +7,7 @@ using TBRPG.Game;
 
 namespace TBRPG.UI;
 
-/// <summary>Choose 3 of the 5 heroes and set their rows (at most 2 in front).</summary>
+/// <summary>Choose 3 heroes and set their rows (at most 2 in front).</summary>
 public partial class HeroSelect : Screen
 {
     private readonly List<string> _picked = new();
@@ -16,6 +16,8 @@ public partial class HeroSelect : Screen
     private VBoxContainer _formation = null!;
     private Godot.Button _begin = null!;
     private int _heat;
+    /// <summary>Card width: all heroes fit side by side in the 1280px layout (narrower as the roster grows).</summary>
+    private static float CardWidth => Math.Clamp((1232f - 6 * (Database.Heroes.Count - 1)) / Database.Heroes.Count, 124f, 164f);
     private Godot.Label _heatLabel = null!;
 
     protected override void Build()
@@ -94,7 +96,7 @@ public partial class HeroSelect : Screen
     private PanelContainer BuildCard(HeroDef def)
     {
         bool locked = !Meta.IsHeroUnlocked(GameSession.Profile, def.Id);
-        var card = new PanelContainer { CustomMinimumSize = new Vector2(164, 0), MouseFilter = MouseFilterEnum.Stop };
+        var card = new PanelContainer { CustomMinimumSize = new Vector2(CardWidth, 0), MouseFilter = MouseFilterEnum.Stop };
         card.GuiInput += e =>
         {
             if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left })
@@ -117,7 +119,7 @@ public partial class HeroSelect : Screen
             q.HorizontalAlignment = HorizontalAlignment.Center;
             lbox.AddChild(q);
             var how = Visuals.Rich($"[center][color=#ffa040]{unlock.Condition}[/color]\n[color=#a99f8f]or unlock at the Ember Shrine ({unlock.Shards} shards)[/color][/center]", 12);
-            how.CustomMinimumSize = new Vector2(140, 0);
+            how.CustomMinimumSize = new Vector2(CardWidth - 24, 0);
             lbox.AddChild(how);
             _cards[def.Id] = card;
             return card;
@@ -126,9 +128,19 @@ public partial class HeroSelect : Screen
         box.AddThemeConstantOverride("separation", 4);
         card.AddChild(box);
 
-        var portrait = Visuals.Portrait(def.Id, 80);
+        var prof = GameSession.Profile;
+        int psize = CardWidth < 150 ? 68 : 80;
+        var portrait = Visuals.Icon($"Portraits/{LookFor(def.Id)}.png", psize);
         portrait.SizeFlagsHorizontal = SizeFlags.ShrinkCenter;
         box.AddChild(portrait);
+        int mastery = Mastery.Level(prof, def.Id);
+        int next = Mastery.NextThreshold(prof, def.Id);
+        var masteryLabel = Visuals.Rich($"[center][color=#ffd76b]{new string('★', mastery)}[/color][color=#4a4058]{new string('☆', Mastery.MaxLevel - mastery)}[/color] " +
+                                        $"[color=#9fd8ff]{Mastery.LevelName(mastery)}[/color][/center]", 11);
+        masteryLabel.TooltipText = $"Hero mastery: {Mastery.Xp(prof, def.Id)}{(next > 0 ? $"/{next}" : "")} XP from runs with this hero.\n" +
+                                   "Adept: a new costume.  Veteran: an alternative ability.  Mastered: start runs with an upgraded basic attack.";
+        masteryLabel.MouseFilter = MouseFilterEnum.Stop;
+        box.AddChild(masteryLabel);
         var name = Visuals.Label(def.Name, 16, Visuals.GoldBright, serif: true);
         name.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         name.HorizontalAlignment = HorizontalAlignment.Center;
@@ -137,24 +149,68 @@ public partial class HeroSelect : Screen
         role.HorizontalAlignment = HorizontalAlignment.Center;
         box.AddChild(role);
         var blurb = Visuals.Rich($"[color=#a99f8f]{def.Blurb}[/color]", 12);
-        blurb.CustomMinimumSize = new Vector2(140, 0);
+        blurb.CustomMinimumSize = new Vector2(CardWidth - 24, 0);
         box.AddChild(blurb);
         box.AddChild(Visuals.Rich(
-            $"HP [b]{def.MaxHp}[/b]  Armor [b]{def.Armor}[/b]  Speed [b]{def.Speed}[/b]\n" +
+            $"HP [b]{def.MaxHp}[/b]  Armor [b]{def.Armor}[/b]\nSpeed [b]{def.Speed}[/b]  " +
             $"Crit [b]{def.Crit}%[/b]  Dodge [b]{def.Dodge}%[/b]\n" +
             $"[color={def.Resource.ColorHex}]{def.Resource.Name}[/color] (max {def.Resource.Max})", 12));
 
         var abilities = new HFlowContainer { MouseFilter = MouseFilterEnum.Ignore };
         abilities.AddThemeConstantOverride("h_separation", 4);
-        foreach (var id in def.Abilities.Prepend(def.BasicAbility))
-        {
-            var ability = Database.Ability(id);
-            abilities.AddChild(Visuals.Icon(Visuals.AbilityIcon(ability), 24, $"{ability.Name}\n{ability.RulesText(false)}"));
-        }
+        FillAbilities(abilities, def);
         box.AddChild(abilities);
+
+        // Mastery loadout: costume and alternative ability, remembered in the profile.
+        if (Mastery.HasCostume(prof, def.Id) && Mastery.Costume(def.Id) is { } costume)
+        {
+            var look = Visuals.Button(prof.CostumeOn.Contains(def.Id) ? costume.Name : "Default look", () => { }, new Vector2(0, 28), 11);
+            look.TooltipText = $"{costume.Name}: {costume.Description}\nClick to switch.";
+            look.Pressed += () =>
+            {
+                if (!prof.CostumeOn.Remove(def.Id)) prof.CostumeOn.Add(def.Id);
+                look.Text = prof.CostumeOn.Contains(def.Id) ? costume.Name : "Default look";
+                portrait.Texture = Visuals.Tex($"Portraits/{LookFor(def.Id)}.png");
+                GameSession.SaveProfile();
+            };
+            box.AddChild(look);
+        }
+        if (Mastery.HasAlt(prof, def.Id) && Mastery.Alt(def.Id) is { } alt)
+        {
+            var altAbility = Database.Ability(alt.AbilityId);
+            var swap = Visuals.Button(prof.AltOn.Contains(def.Id) ? $"Using {altAbility.Name}" : $"Using {Database.Ability(alt.Replaces).Name}", () => { }, new Vector2(0, 28), 11);
+            swap.TooltipText = $"Alternative ability: {altAbility.Name}\n{altAbility.RulesText(false)}\nClick to swap it with {Database.Ability(alt.Replaces).Name}.";
+            swap.Pressed += () =>
+            {
+                if (!prof.AltOn.Remove(def.Id)) prof.AltOn.Add(def.Id);
+                swap.Text = prof.AltOn.Contains(def.Id) ? $"Using {altAbility.Name}" : $"Using {Database.Ability(alt.Replaces).Name}";
+                FillAbilities(abilities, def);
+                GameSession.SaveProfile();
+            };
+            box.AddChild(swap);
+        }
 
         _cards[def.Id] = card;
         return card;
+    }
+
+    /// <summary>The portrait to show: the costume if it is unlocked and switched on.</summary>
+    private static string LookFor(string heroId)
+    {
+        var prof = GameSession.Profile;
+        return prof.CostumeOn.Contains(heroId) && Mastery.HasCostume(prof, heroId) && Mastery.Costume(heroId) is { } c ? c.Sprite : heroId;
+    }
+
+    private static void FillAbilities(HFlowContainer flow, HeroDef def)
+    {
+        foreach (var child in flow.GetChildren()) child.QueueFree();
+        var prof = GameSession.Profile;
+        var alt = prof.AltOn.Contains(def.Id) && Mastery.HasAlt(prof, def.Id) ? Mastery.Alt(def.Id) : null;
+        foreach (var id in def.Abilities.Select(a => alt is not null && a == alt.Replaces ? alt.AbilityId : a).Prepend(def.BasicAbility))
+        {
+            var ability = Database.Ability(id);
+            flow.AddChild(Visuals.Icon(Visuals.AbilityIcon(ability), 24, $"{ability.Name}\n{ability.RulesText(false)}"));
+        }
     }
 
     private void Toggle(string id, bool silent = false)
@@ -218,7 +274,7 @@ public partial class HeroSelect : Screen
             var def = Database.Hero(id);
             var entry = new HBoxContainer();
             entry.AddThemeConstantOverride("separation", 4);
-            entry.AddChild(Visuals.Portrait(id, 36));
+            entry.AddChild(Visuals.Icon($"Portraits/{LookFor(id)}.png", 36));
             var front = Visuals.Button("Front", () => SetRow(id, Row.Front), new Vector2(70, 34), 13);
             front.ToggleMode = true;
             front.ButtonPressed = _rows[id] == Row.Front;
@@ -229,6 +285,20 @@ public partial class HeroSelect : Screen
             entry.AddChild(front);
             entry.AddChild(back);
             row.AddChild(entry);
+        }
+        // Duo techniques this party unlocks (and the ones one hero away).
+        var duos = Database.ActiveSynergies(_picked).ToList();
+        var near = Database.Synergies.Where(syn => !duos.Contains(syn) && (_picked.Contains(syn.HeroA) || _picked.Contains(syn.HeroB))).ToList();
+        if (duos.Count > 0 || near.Count > 0)
+        {
+            string Short(string id) => Database.Hero(id).Name.Split(' ')[0];
+            var text = string.Join("   ", duos.Select(d => $"[color=#ffd76b]⚔ {Database.Ability(d.AbilityId).Name}[/color] [color=#a99f8f]({Short(d.HeroA)} + {Short(d.HeroB)})[/color]"));
+            if (_picked.Count < 3 && near.Count > 0)
+                text += (text.Length > 0 ? "   " : "") + "[color=#5e566a]Possible duos: " + string.Join(", ", near.Take(3).Select(d => $"{Short(d.HeroA)} + {Short(d.HeroB)}")) + "[/color]";
+            var duoLabel = Visuals.Rich(text, 12);
+            duoLabel.TooltipText = string.Join("\n\n", duos.Select(d => $"{Database.Ability(d.AbilityId).Name}: {d.Flavor}\n{Database.Ability(d.AbilityId).Description}"));
+            duoLabel.MouseFilter = MouseFilterEnum.Stop;
+            _formation.AddChild(duoLabel);
         }
         _begin.Disabled = _picked.Count != 3;
     }

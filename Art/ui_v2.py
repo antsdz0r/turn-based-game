@@ -3,6 +3,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from style_kit import Spr, hx
 import units_v2 as U
+import units_v3  # noqa: F401  (patches U with the redesigned and new units)
 
 def weapon(kind):
     s = Spr(24, 48, light=(-0.7, -0.6))
@@ -38,6 +39,31 @@ def weapon(kind):
         s.part(lambda d: d.polygon([(9, 46), (14, 46), (18, 6), (6, 8)]), 'wood')
         s.part(lambda d: d.ellipse([4, 2, 20, 16]), 'bone')
         s.dots([(9, 20), (14, 26), (10, 32)], '5c4228')
+    elif kind == 'hammer':
+        s.part(lambda d: d.rectangle([10, 14, 13, 47]), 'wood')
+        s.part(lambda d: d.rectangle([2, 2, 21, 15]), 'iron', round_=0.5)
+        s.part(lambda d: d.rectangle([4, 4, 19, 13]), 'metal', round_=0.5)
+        s.flat(lambda d: (d.line([(2, 2), (21, 2)]), d.line([(6, 8), (17, 8)])), 'f4f2fa')
+        s.part(lambda d: d.rectangle([9, 40, 14, 42]), 'gold', round_=0)
+    elif kind == 'spear':
+        s.part(lambda d: d.rectangle([11, 10, 12, 47]), 'wood')
+        s.part(lambda d: d.polygon([(11, 0), (15, 8), (12, 14), (8, 8)]), 'metal', round_=0.3)
+        s.flat(lambda d: d.line([(11, 1), (12, 13)]), 'f4f2fa')
+        s.part(lambda d: d.polygon([(8, 14), (15, 14), (12, 18)]), 'red', round_=0)
+    elif kind == 'scythe':
+        s.part(lambda d: d.line([(14, 4), (10, 47)], width=2), 'wood')
+        s.part(lambda d: d.polygon([(14, 2), (2, 4), (0, 12), (6, 8), (14, 8)]), 'metal', round_=0.3)
+        s.flat(lambda d: d.line([(2, 4), (0, 12)]), 'f4f2fa')
+    elif kind == 'flail':
+        s.part(lambda d: d.rectangle([10, 26, 13, 47]), 'wood')
+        s.part(lambda d: d.line([(12, 26), (8, 16), (12, 10)], width=1), 'iron')
+        s.part(lambda d: d.ellipse([5, 1, 19, 14]), 'iron', round_=0.8)
+        s.dots([(12, 0), (4, 7), (20, 7), (12, 15), (6, 2), (18, 2)], 'b0aec8')
+    elif kind == 'rapier':
+        s.part(lambda d: d.polygon([(11, 0), (13, 0), (13, 36), (11, 36)]), 'teal', round_=0.2)
+        s.flat(lambda d: d.line([(12, 1), (12, 35)]), 'b8f5e4')
+        s.part(lambda d: d.ellipse([6, 34, 18, 41]), 'gold', round_=0.6)
+        s.part(lambda d: d.rectangle([11, 40, 13, 46]), 'leather')
     return s.finish(rim=None)
 
 def claw_fx():
@@ -119,7 +145,7 @@ def fog():
 if __name__ == '__main__':
     for k in ('sword', 'greatsword', 'dagger', 'mace', 'club', 'axe'): weapon(k).image().save(f'FX/weapon_{k}.png')
     claw_fx().save('FX/claw.png')
-    for h in ('vanguard', 'arcanist', 'warden', 'shadowblade', 'ranger', 'berserker', 'hexer'): portrait(h).save(f'Portraits/{h}.png')
+    for h in ('vanguard', 'arcanist', 'warden', 'shadowblade', 'ranger', 'berserker', 'hexer', 'alchemist', 'spellblade'): portrait(h).save(f'Portraits/{h}.png')
     frame_texture().save('UI/frame.png')
     bar_texture(hx('2a5560'), hx('6fd0c0')).save('UI/bar_hero.png')
     bar_texture(hx('74291f'), hx('f28a3a')).save('UI/bar_enemy.png')
